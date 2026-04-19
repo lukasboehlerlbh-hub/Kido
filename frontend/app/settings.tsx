@@ -68,9 +68,9 @@ export default function SettingsScreen() {
               </View>
             </View>
             <Text style={s.label}>Name</Text>
-            <TextInput testID="name-input" style={s.input} value={name} onChangeText={setName} placeholder="Dein Name" placeholderTextColor="#aaa" />
+            <TextInput testID="settings-name-input" style={s.input} value={name} onChangeText={setName} placeholder="Dein Name" placeholderTextColor="#aaa" />
             <Text style={s.label}>Telefonnummer</Text>
-            <TextInput testID="phone-input" style={s.input} value={phone} onChangeText={setPhone} placeholder="+41 79 123 45 67" keyboardType="phone-pad" placeholderTextColor="#aaa" />
+            <TextInput testID="settings-phone-input" style={s.input} value={phone} onChangeText={setPhone} placeholder="+41 79 123 45 67" keyboardType="phone-pad" placeholderTextColor="#aaa" />
           </View>
 
           {/* Kanton */}
