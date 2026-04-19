@@ -61,6 +61,47 @@ export default function SettingsScreen() {
     }
   };
 
+  const handleResetTestChain = () => {
+    Alert.alert(
+      'Test-Kette zurücksetzen?',
+      'Alle Stimmen, Plan-Änderungen, Präferenzen, Ferienwünsche und Nachrichten der Test-Kette werden gelöscht und auf den Ursprungszustand zurückgesetzt. Du bleibst als dieselbe Person eingeloggt.',
+      [
+        { text: 'Abbrechen', style: 'cancel' },
+        {
+          text: 'Zurücksetzen',
+          style: 'destructive',
+          onPress: async () => {
+            setSaving(true);
+            try {
+              const data = await api.seedTestChain();
+              // Find current user in new seed by matching name (phone also unique)
+              const myNew = data.members.find((m: any) => m.phone === user?.userPhone);
+              if (myNew) {
+                await setUser({
+                  userId: myNew.user_id,
+                  userName: myNew.user_name,
+                  userPhone: myNew.phone,
+                  avatarColor: myNew.avatar_color,
+                  chainId: myNew.chain_id,
+                  chainMemberId: myNew.member_id,
+                  chainName: myNew.chain_name,
+                  kanton: myNew.kanton || 'ZH',
+                  prefsSet: true,
+                });
+              }
+              Alert.alert('Erledigt', 'Test-Kette wurde auf den Ursprungszustand zurückgesetzt.');
+              router.replace('/(tabs)/home');
+            } catch (e: any) {
+              Alert.alert('Fehler', e.message || 'Zurücksetzen fehlgeschlagen.');
+            } finally {
+              setSaving(false);
+            }
+          },
+        },
+      ],
+    );
+  };
+
   const handleSave = async () => {
     if (!name.trim()) { Alert.alert('Pflichtfeld', 'Bitte Namen eingeben.'); return; }
     setSaving(true);
@@ -148,10 +189,16 @@ export default function SettingsScreen() {
 
           {/* Test Chain – Switch Member */}
           {isTestChain && (
-            <TouchableOpacity testID="switch-member-btn" style={s.switchBtn} onPress={handleOpenSwitch}>
-              <Ionicons name="swap-horizontal-outline" size={20} color="#1D9E75" />
-              <Text style={s.switchText}>Zu anderem Kettenmitglied wechseln (Test)</Text>
-            </TouchableOpacity>
+            <>
+              <TouchableOpacity testID="switch-member-btn" style={s.switchBtn} onPress={handleOpenSwitch}>
+                <Ionicons name="swap-horizontal-outline" size={20} color="#1D9E75" />
+                <Text style={s.switchText}>Zu anderem Kettenmitglied wechseln (Test)</Text>
+              </TouchableOpacity>
+              <TouchableOpacity testID="reset-test-chain-btn" style={s.resetBtn} onPress={handleResetTestChain} disabled={saving}>
+                <Ionicons name="refresh-outline" size={20} color="#BA7517" />
+                <Text style={s.resetText}>Test-Kette auf Ursprungszustand zurücksetzen</Text>
+              </TouchableOpacity>
+            </>
           )}
 
           {/* Logout */}
@@ -243,8 +290,10 @@ const s = StyleSheet.create({
   saveBtnText: { color: '#fff', fontWeight: '600', fontSize: 16 },
   logoutBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, borderWidth: 1, borderColor: '#FCEBEB', borderRadius: 10, paddingVertical: 14, marginBottom: 24, backgroundColor: '#FCEBEB' },
   logoutText: { color: '#E24B4A', fontWeight: '600', fontSize: 16 },
-  switchBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, borderWidth: 1, borderColor: '#1D9E75', borderStyle: 'dashed', borderRadius: 10, paddingVertical: 12, marginBottom: 12, backgroundColor: '#F0FBF7' },
+  switchBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, borderWidth: 1, borderColor: '#1D9E75', borderStyle: 'dashed', borderRadius: 10, paddingVertical: 12, marginBottom: 8, backgroundColor: '#F0FBF7' },
   switchText: { color: '#1D9E75', fontWeight: '600', fontSize: 14 },
+  resetBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, borderWidth: 1, borderColor: '#F4C27A', borderStyle: 'dashed', borderRadius: 10, paddingVertical: 12, marginBottom: 12, backgroundColor: '#FAEEDA' },
+  resetText: { color: '#BA7517', fontWeight: '600', fontSize: 14 },
   versionText: { textAlign: 'center', fontSize: 11, color: '#bbb' },
   overlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.4)', justifyContent: 'flex-end' },
   modalBox: { backgroundColor: '#fff', borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: 20, maxHeight: '90%' },
