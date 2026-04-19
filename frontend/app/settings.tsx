@@ -1,7 +1,7 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, SafeAreaView, TouchableOpacity,
-  TextInput, Alert, ActivityIndicator, KeyboardAvoidingView, Platform,
+  TextInput, Alert, ActivityIndicator, KeyboardAvoidingView, Platform, Modal,
 } from 'react-native';
 import { router } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
@@ -12,12 +12,54 @@ const AVATAR_COLORS = ['#1D9E75','#8B5CF6','#FB7185','#F59E0B','#60A5FA','#F472B
 const KANTONS = ['ZH', 'BE', 'SG', 'AG', 'BS'];
 
 export default function SettingsScreen() {
-  const { user, updateUser, logout } = useUser();
+  const { user, setUser, updateUser, logout } = useUser();
   const [name, setName] = useState(user?.userName || '');
   const [phone, setPhone] = useState(user?.userPhone || '');
   const [color, setColor] = useState(user?.avatarColor || AVATAR_COLORS[0]);
   const [kanton, setKanton] = useState(user?.kanton || 'ZH');
   const [saving, setSaving] = useState(false);
+  const [switchModal, setSwitchModal] = useState(false);
+  const [chainMembers, setChainMembers] = useState<any[]>([]);
+  const [loadingMembers, setLoadingMembers] = useState(false);
+
+  const isTestChain = !!user?.userPhone?.startsWith('+41 79 001 00 ');
+
+  const handleOpenSwitch = async () => {
+    if (!user?.chainId) return;
+    setSwitchModal(true);
+    setLoadingMembers(true);
+    try {
+      const chain = await api.getChain(user.chainId);
+      setChainMembers(chain.members || []);
+    } catch (e: any) {
+      Alert.alert('Fehler', e.message || 'Mitglieder konnten nicht geladen werden.');
+    } finally {
+      setLoadingMembers(false);
+    }
+  };
+
+  const handleSwitchTo = async (m: any) => {
+    try {
+      const res = await fetch(`${process.env.EXPO_PUBLIC_BACKEND_URL || ''}/api/users/${m.user_id}`);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const userDoc = await res.json();
+      await setUser({
+        userId: m.user_id,
+        userName: m.user_name,
+        userPhone: userDoc.phone || '',
+        avatarColor: m.avatar_color,
+        chainId: user!.chainId,
+        chainMemberId: m.id,
+        chainName: user!.chainName,
+        kanton: userDoc.kanton || 'ZH',
+        prefsSet: true,
+      });
+      setSwitchModal(false);
+      router.replace('/(tabs)/home');
+    } catch (e: any) {
+      Alert.alert('Fehler', e.message || 'Wechsel fehlgeschlagen.');
+    }
+  };
 
   const handleSave = async () => {
     if (!name.trim()) { Alert.alert('Pflichtfeld', 'Bitte Namen eingeben.'); return; }
@@ -104,6 +146,14 @@ export default function SettingsScreen() {
             {saving ? <ActivityIndicator color="#fff" /> : <Text style={s.saveBtnText}>Speichern</Text>}
           </TouchableOpacity>
 
+          {/* Test Chain – Switch Member */}
+          {isTestChain && (
+            <TouchableOpacity testID="switch-member-btn" style={s.switchBtn} onPress={handleOpenSwitch}>
+              <Ionicons name="swap-horizontal-outline" size={20} color="#1D9E75" />
+              <Text style={s.switchText}>Zu anderem Kettenmitglied wechseln (Test)</Text>
+            </TouchableOpacity>
+          )}
+
           {/* Logout */}
           <TouchableOpacity testID="logout-btn" style={s.logoutBtn} onPress={handleLogout}>
             <Ionicons name="log-out-outline" size={20} color="#E24B4A" />
@@ -113,6 +163,54 @@ export default function SettingsScreen() {
           <Text style={s.versionText}>Kido v1.0 · Kido ersetzt keine rechtliche Beratung</Text>
         </ScrollView>
       </KeyboardAvoidingView>
+
+      {/* Member Switcher Modal */}
+      <Modal visible={switchModal} animationType="slide" transparent onRequestClose={() => setSwitchModal(false)}>
+        <View style={s.overlay}>
+          <View style={s.modalBox}>
+            <View style={s.modalHeader}>
+              <Text style={s.modalTitle}>Mitglied wechseln</Text>
+              <TouchableOpacity onPress={() => setSwitchModal(false)} testID="close-switch-modal">
+                <Ionicons name="close" size={24} color="#6E7170" />
+              </TouchableOpacity>
+            </View>
+            {loadingMembers ? (
+              <View style={{ padding: 40, alignItems: 'center' }}>
+                <ActivityIndicator color="#1D9E75" size="large" />
+              </View>
+            ) : (
+              <ScrollView style={{ maxHeight: 500 }} showsVerticalScrollIndicator={false}>
+                {chainMembers.map((m: any) => {
+                  const isCurrent = m.id === user?.chainMemberId;
+                  return (
+                    <TouchableOpacity
+                      key={m.id}
+                      testID={`switch-to-${m.user_name.replace(/\s/g, '')}`}
+                      style={[s.memberRow, isCurrent && { backgroundColor: '#F0FBF7', borderColor: '#1D9E75' }]}
+                      onPress={() => !isCurrent && handleSwitchTo(m)}
+                      disabled={isCurrent}
+                    >
+                      <View style={[s.memberAvatar, { backgroundColor: m.avatar_color }]}>
+                        <Text style={s.memberAvatarText}>{m.user_name[0]}</Text>
+                      </View>
+                      <View style={{ flex: 1 }}>
+                        <Text style={s.memberName}>{m.user_name}</Text>
+                        <Text style={s.memberMeta}>
+                          {m.current_logic === 'even' ? 'Gerade' : 'Ungerade'} · {m.flex_level} · {m.court_ruling}
+                        </Text>
+                      </View>
+                      {isCurrent
+                        ? <Text style={s.currentTag}>aktuell</Text>
+                        : <Ionicons name="chevron-forward" size={20} color="#6E7170" />
+                      }
+                    </TouchableOpacity>
+                  );
+                })}
+              </ScrollView>
+            )}
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -145,5 +243,17 @@ const s = StyleSheet.create({
   saveBtnText: { color: '#fff', fontWeight: '600', fontSize: 16 },
   logoutBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, borderWidth: 1, borderColor: '#FCEBEB', borderRadius: 10, paddingVertical: 14, marginBottom: 24, backgroundColor: '#FCEBEB' },
   logoutText: { color: '#E24B4A', fontWeight: '600', fontSize: 16 },
+  switchBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, borderWidth: 1, borderColor: '#1D9E75', borderStyle: 'dashed', borderRadius: 10, paddingVertical: 12, marginBottom: 12, backgroundColor: '#F0FBF7' },
+  switchText: { color: '#1D9E75', fontWeight: '600', fontSize: 14 },
   versionText: { textAlign: 'center', fontSize: 11, color: '#bbb' },
+  overlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.4)', justifyContent: 'flex-end' },
+  modalBox: { backgroundColor: '#fff', borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: 20, maxHeight: '90%' },
+  modalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 },
+  modalTitle: { fontSize: 19, fontWeight: '700', color: '#1A1C1B' },
+  memberRow: { flexDirection: 'row', alignItems: 'center', gap: 12, padding: 12, borderRadius: 10, marginBottom: 6, borderWidth: 1, borderColor: '#E5E8E7' },
+  memberAvatar: { width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center' },
+  memberAvatarText: { fontSize: 17, fontWeight: '700', color: '#fff' },
+  memberName: { fontSize: 14, fontWeight: '600', color: '#1A1C1B' },
+  memberMeta: { fontSize: 11, color: '#6E7170', marginTop: 2 },
+  currentTag: { fontSize: 11, fontWeight: '700', color: '#1D9E75', backgroundColor: '#E1F5EE', paddingHorizontal: 8, paddingVertical: 3, borderRadius: 6 },
 });

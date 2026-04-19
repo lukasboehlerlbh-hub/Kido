@@ -53,4 +53,7 @@ export const api = {
 
   // Swiss Holidays
   getSwissHolidays: (kanton: string, year: number) => req('GET', `/swiss-holidays/${kanton}/${year}`),
+
+  // Dev seed
+  seedTestChain: () => req('POST', '/dev/seed-test-chain', {}),
 };
