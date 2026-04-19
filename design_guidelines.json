@@ -1,0 +1,170 @@
+{
+  "theme": "light",
+  "archetype": "Organic & Earthy (Customized for Calm Mediation)",
+  "domain": "Family, Mediation, Co-parenting App",
+  "language": "de-CH",
+  "colors": {
+    "primary": "#1D9E75",
+    "primary_light": "#E1F5EE",
+    "secondary": "#CECBF6",
+    "warning": {
+      "bg": "#FAEEDA",
+      "text": "#BA7517"
+    },
+    "error": {
+      "bg": "#FCEBEB",
+      "text": "#E24B4A"
+    },
+    "background": "#F7F9F8",
+    "surface": "#FFFFFF",
+    "text_main": "#1A1C1B",
+    "text_muted": "#6E7170",
+    "border": "#E5E8E7",
+    "avatars": {
+      "Sarah": "#1D9E75",
+      "Thomas": "#CECBF6",
+      "Nina": "#FFB3A7",
+      "Marco": "#BA7517",
+      "Petra": "#82A9E8",
+      "Stefan": "#F4A6C1"
+    },
+    "calendar": {
+      "with_children": "#E1F5EE",
+      "kido_suggestion": "#CECBF6",
+      "free": "#F0F2F1",
+      "conflict": "#FCEBEB"
+    }
+  },
+  "typography": {
+    "font_family": "System",
+    "sizes": {
+      "h1": 28,
+      "h2": 22,
+      "h3": 18,
+      "body": 16,
+      "subtext": 14,
+      "tiny": 12
+    },
+    "weights": {
+      "bold": "700",
+      "semibold": "600",
+      "medium": "500",
+      "regular": "400"
+    }
+  },
+  "spacing_and_layout": {
+    "border_radius": {
+      "card": 14,
+      "button": 10,
+      "pill": 20,
+      "avatar": 24,
+      "input": 12
+    },
+    "padding": {
+      "screen_horizontal": 20,
+      "screen_vertical": 24,
+      "card": 16,
+      "button_vertical": 14,
+      "button_horizontal": 20
+    },
+    "gap": {
+      "small": 8,
+      "medium": 16,
+      "large": 24,
+      "xlarge": 32
+    }
+  },
+  "components_spec": {
+    "button": {
+      "primary": "bg: #1D9E75, text: #FFFFFF, borderRadius: 10px, fontWeight: 600",
+      "secondary": "bg: #E1F5EE, text: #1D9E75, borderRadius: 10px, fontWeight: 600",
+      "danger": "bg: #FCEBEB, text: #E24B4A, borderRadius: 10px, fontWeight: 600"
+    },
+    "card": {
+      "default": "bg: #FFFFFF, borderRadius: 14px, shadowColor: #000, shadowOpacity: 0.05, shadowRadius: 10, elevation: 2, padding: 16"
+    },
+    "input": {
+      "default": "borderWidth: 1px, borderColor: #E5E8E7, borderRadius: 12px, padding: 14px, bg: #FFFFFF, color: #1A1C1B"
+    },
+    "pill": {
+      "default": "paddingHorizontal: 12, paddingVertical: 6, borderRadius: 20, bg: #F0F2F1"
+    }
+  },
+  "media_urls": {
+    "hero_background": {
+      "url": "https://static.prod-images.emergentagent.com/jobs/a694a9a8-64f2-40f1-9441-365d605ac20b/images/282eb34916edd2e4df180c9ff74c6d657b71df1ed43cd5c26643d791203887bb.png",
+      "description": "Calming Swiss mountains illustration, use for index.js background"
+    },
+    "kido_ai_avatar": {
+      "url": "https://static.prod-images.emergentagent.com/jobs/a694a9a8-64f2-40f1-9441-365d605ac20b/images/cd9164c031921f73252674eb164024f9bd0f052767040967c8391fec4a61df73.png",
+      "description": "Friendly AI avatar for chat.js"
+    },
+    "family_abstract": {
+      "url": "https://static.prod-images.emergentagent.com/jobs/a694a9a8-64f2-40f1-9441-365d605ac20b/images/bd213c046182717a3c36d311d85638956047b583a9d600ac0f55cc6093a01302.png",
+      "description": "Abstract shapes for empty states or home.js banners"
+    },
+    "sarah_avatar": {
+      "url": "https://images.pexels.com/photos/8727449/pexels-photo-8727449.jpeg?auto=compress&cs=tinysrgb&dpr=2&h=650&w=940",
+      "description": "Portrait to use for Sarah's avatar"
+    },
+    "petra_avatar": {
+      "url": "https://images.pexels.com/photos/3785843/pexels-photo-3785843.jpeg?auto=compress&cs=tinysrgb&dpr=2&h=650&w=940",
+      "description": "Portrait to use for Petra's avatar"
+    }
+  },
+  "screens": {
+    "index.js": {
+      "purpose": "Welcome & Intro",
+      "layout": "Full-screen ImageBackground with `hero_background`. Bottom half should be a white overlay container with 24px top radius containing 4 brief feature cards and a 'Loslegen' (Start) primary button.",
+      "tone": "Inviting, safe, calm"
+    },
+    "onboarding.js": {
+      "purpose": "Create or join a 'Kette' (chain)",
+      "layout": "Clean top-down layout. Two main large choice cards: 'Neue Kette gründen' (Create) vs 'Mit Token beitreten' (Join).",
+      "tone": "Clear, structural"
+    },
+    "setup-prefs.js": {
+      "purpose": "Preferences setup",
+      "layout": "Form scroll view. Use segmented controls/pills for 'Gerichtsbeschluss' (Court ruling), Weekend logic (Odd/Even/Flex), and Flex-Level slider. Neutral background, white cards for sections.",
+      "tone": "Non-judgmental, objective"
+    },
+    "home.js": {
+      "purpose": "Main dashboard",
+      "layout": "Top section: Scrollable horizontal list of avatars (pill row) for chain members. Middle section: Large 'Wochenendplan' card highlighting the upcoming weekend. Bottom: 'Offene Punkte' (Open items) and 'Ferien' (Holidays) summary.",
+      "tone": "Overview, reassuring"
+    },
+    "weekends.js": {
+      "purpose": "Weekend calendar grid",
+      "layout": "Grid showing members (rows) x 8 weeks (columns). Use color-coded blocks: #E1F5EE for 'with children', Gray for free. Kido AI suggestions overlay clearly with #CECBF6 background. Conflicts highlighted with #FCEBEB.",
+      "tone": "Organized, easy to parse"
+    },
+    "conflict.js": {
+      "purpose": "Conflict resolution flow",
+      "layout": "Step-by-step wizard. 3 stages: Clean, Ungern (reluctant), Blocked. Use amber (#FAEEDA / #BA7517) for warnings, red (#FCEBEB / #E24B4A) for blocked/hard conflicts. Emphasize Kido's mediation messages.",
+      "tone": "Empathetic, de-escalating"
+    },
+    "holidays.js": {
+      "purpose": "Holiday planning",
+      "layout": "List of Swiss school holidays by Canton (ZH, BE, SG, AG, BS selectable). Provide visual bars representing periods distributed among parents.",
+      "tone": "Planning, forward-looking"
+    },
+    "chat.js": {
+      "purpose": "Messages and Mediation",
+      "layout": "Tabs for: Kido AI, Direct, Group. Kido messages MUST have #CECBF6 background and `kido_ai_avatar`. Include a tone moderation banner overlay if text is aggressive (using warning colors).",
+      "tone": "Mediating, supportive"
+    },
+    "settings.js": {
+      "purpose": "User configuration",
+      "layout": "List of configuration items. Profile edit, Canton selection (for holidays), Privacy toggles, Logout.",
+      "tone": "Functional"
+    }
+  },
+  "instructions_to_main_agent": {
+    "tech_stack_rules": "This is strictly an Expo React Native application. Do NOT use tailwind css classes. Use `StyleSheet.create()` exclusively for styling. Use core React Native components (`View`, `Text`, `TouchableOpacity`, `ScrollView`, `TextInput`, `Image`, `SafeAreaView`).",
+    "testing_attributes": "All interactive elements (buttons, inputs) MUST use the `testID` property (the React Native equivalent of data-testid). Format: `testID=\"kebab-case-name\"`.",
+    "color_implementation": "Never use pure white text on light backgrounds without testing contrast. Follow the exact hex codes provided in the colors section. Always use the specified border radii (14px for cards, 10px for buttons).",
+    "language": "Ensure all UI text is in German (Swiss context, e.g., 'Ferien' instead of 'Urlaub', 'Kanton' instead of 'Bundesland').",
+    "routing": "Use React Navigation for moving between screens. Typically, implement a Bottom Tab Navigator for Home, Weekends, Holidays, Chat, and a Stack Navigator for Settings, Onboarding, Conflict resolution.",
+    "file_extensions": "Create all files as .js files as instructed. e.g., `index.js`, `onboarding.js`."
+  }
+}
