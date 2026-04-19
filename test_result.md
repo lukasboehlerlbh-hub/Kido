@@ -221,6 +221,54 @@ backend:
         agent: "testing"
         comment: "POST /api/messages with recipient_id=null + chain_id sends a chain message (returns {message:...}). POST with recipient_id='kido' returns {message, kido_response} where kido_response.sender_id='kido' and contains a valid German reply (get_kido_ai_response keyword-based)."
 
+  - task: "Phase-C Chat Channels (CRUD + messages + visibility filter)"
+    implemented: true
+    working: true
+    file: "backend/server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: true
+        agent: "testing"
+        comment: "All chat-channel endpoints verified (/app/backend_test_phasec.py). POST /api/chat-channels persists chain_id, name, type, member_ids, created_by, icon, color. GET /api/chains/{chain_id}/chat-channels with ?viewer_member_id=xxx correctly filters: viewer not in member_ids does NOT see the channel (Tom sees 0 channels when none include him; Anna sees only the channel she's a member of). PUT partial update works for name/color/member_ids (other fields preserved). DELETE /api/chat-channels/{id} removes the channel AND cascades delete on associated channel_messages (verified: GET /channel-messages/{id} returns [] afterwards). POST /api/channel-messages persists correctly; GET /api/channel-messages/{channel_id} returns messages sorted ASC by created_date."
+
+  - task: "Phase-C Relationships (coparent + couple CRUD + confirm)"
+    implemented: true
+    working: true
+    file: "backend/server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: true
+        agent: "testing"
+        comment: "Verified: POST /api/coparent-relations with children:[{name:'Mia'},{name:'Tom'}] creates relation; GET /api/chains/{id}/coparent-relations lists it; DELETE /api/coparent-relations/{id} removes it. POST /api/couple-relations with sync_pref ∈ {same, opposite, none} creates the record and confirmed_by_both defaults to False. PUT /api/couple-relations/{id}/confirm flips confirmed_by_both to True and persists. GET /api/chains/{id}/couple-relations lists all couples; DELETE /api/couple-relations/{id} removes the couple."
+
+  - task: "Phase-C Consistency Check endpoint"
+    implemented: true
+    working: true
+    file: "backend/server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: true
+        agent: "testing"
+        comment: "GET /api/chains/{chain_id}/consistency-check returns {issues, couples_count, coparents_count}. Verified all three issue types in one pass: (1) couple_sync_broken (severity=warning) fires for a confirmed sync_pref='same' couple where partners have DIFFERENT current_logic (Anna=even / Sara=odd); members list contains both partner ids. (2) couple_split_broken (severity=warning) fires for a confirmed sync_pref='opposite' couple where partners have SAME current_logic (Peter=even / Tom=even). (3) couple_unconfirmed (severity=info) fires for any couple where confirmed_by_both=False (Lisa & Max). couples_count and coparents_count reflect actual document counts."
+
+  - task: "Phase-A Vote logic_changes field + acceptance rules"
+    implemented: true
+    working: true
+    file: "backend/server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: true
+        agent: "testing"
+        comment: "POST /api/chains/{id}/calculate-plan now writes a logic_changes:bool field on every plan_vote (True only for members whose proposed_schedule differs from their current schedule). On the 6-member ungern seed scenario, only the pivot (Anna) has logic_changes=True + is_active=True; all 5 others have logic_changes=False + is_active=False + vote='na'. Acceptance path confirmed: pivot votes 'accepted' → plan.status='accepted' (all_voted check ignores is_active=False rows, and the single required (logic_changes=True) voter accepted). kido_message is replaced with 'Dank des Entgegenkommens von Anna Muster …'. Decline path: pivot declines → status='partial' (the decline, not pending na-votes, triggers partial). Rule verified: status=accepted iff (all active voters voted) AND (no declines from active) AND (all logic_changes=True voters accepted)."
+
 frontend:
   - task: "Bottom tab bar SafeArea (no OS button overlap)"
     implemented: true
@@ -345,3 +393,36 @@ agent_communication:
       • End-to-end flow: chain creation, invitation + accept, preferences, calculate-plan, voting (status→
         'accepted'), holiday wish create/share/accept/list, chain message, Kido AI response – all working.
       No critical or minor issues observed. All tasks in current_focus are green; I've cleared the focus list.
+  - agent: "testing"
+    message: |
+      Phase-C backend tests completed – 78/78 checks PASSED (/app/backend_test_phasec.py).
+      Verified NEW endpoints only (no re-test of previously green items):
+
+      Chat Channels:
+      • POST /api/chat-channels persists all fields (chain_id, name, type, member_ids, created_by, icon, color).
+      • GET /api/chains/{chain_id}/chat-channels?viewer_member_id=xxx correctly hides channels where viewer is NOT in member_ids (Anna sees only channel she's in; Tom sees 0).
+      • PUT /api/chat-channels/{id} with partial body updates name/color/member_ids and preserves untouched fields (icon).
+      • DELETE /api/chat-channels/{id} deletes the channel AND cascades on channel_messages (verified via GET afterwards → []).
+      • POST /api/channel-messages persists; GET /api/channel-messages/{channel_id} returns list sorted ASC by created_date.
+
+      Relationships:
+      • POST /api/coparent-relations → creates with children list; GET/DELETE work.
+      • POST /api/couple-relations → confirmed_by_both defaults to False; sync_pref stored for 'same'/'opposite'/'none'.
+      • PUT /api/couple-relations/{id}/confirm flips confirmed_by_both=True.
+      • GET/DELETE on couple-relations work.
+
+      Consistency Check:
+      • GET /api/chains/{chain_id}/consistency-check returns {issues:[...], couples_count, coparents_count} with correct counts.
+      • couple_sync_broken (severity='warning') fires when a confirmed sync_pref='same' couple has DIFFERENT current_logic.
+      • couple_split_broken (severity='warning') fires when a confirmed sync_pref='opposite' couple has SAME current_logic.
+      • couple_unconfirmed (severity='info') fires for any couple where confirmed_by_both=False.
+      • All three issue types coexisted correctly in one chain; members arrays contain exact partner ids.
+
+      Vote logic_changes (Phase A quick-verify):
+      • Every plan_vote now has a logic_changes:bool field. On ungern seed scenario, only the pivot has
+        logic_changes=True + is_active=True; other 5 have logic_changes=False + is_active=False + vote='na'.
+      • Pivot accepts → status='accepted' (all active voters done AND required logic-change voter accepted AND no declines).
+      • Pivot declines → status='partial'.
+      • kido_message gets replaced with 'Dank des Entgegenkommens von …' on stage 2 acceptance.
+
+      No critical issues. All new endpoints are working as specified.

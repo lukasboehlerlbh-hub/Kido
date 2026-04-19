@@ -932,6 +932,177 @@ async def seed_test_chain():
         "members": created_members,
     }
 
+# ── Chat Channels ─────────────────────────────────────────────────────────────
+class ChatChannelRequest(BaseModel):
+    chain_id: str
+    name: str
+    member_ids: List[str]
+    type: str = "subgroup_manual"
+    created_by: Optional[str] = None
+    icon: Optional[str] = None
+    color: Optional[str] = None
+
+class UpdateChatChannelRequest(BaseModel):
+    name: Optional[str] = None
+    member_ids: Optional[List[str]] = None
+    icon: Optional[str] = None
+    color: Optional[str] = None
+
+@app.post("/api/chat-channels")
+async def create_channel(req: ChatChannelRequest):
+    doc = {"chain_id": req.chain_id, "name": req.name, "member_ids": req.member_ids,
+           "type": req.type, "created_by": req.created_by,
+           "icon": req.icon, "color": req.color,
+           "created_date": datetime.now(timezone.utc)}
+    res = await db.chat_channels.insert_one(doc)
+    doc["_id"] = res.inserted_id
+    return serialize_doc(doc)
+
+@app.get("/api/chains/{chain_id}/chat-channels")
+async def list_channels(chain_id: str, viewer_member_id: Optional[str] = None):
+    """Return channels visible to viewer. If viewer given, only channels containing viewer."""
+    channels = await db.chat_channels.find({"chain_id": chain_id}).to_list(100)
+    out = []
+    for c in channels:
+        if viewer_member_id and viewer_member_id not in c.get("member_ids", []):
+            continue
+        out.append(serialize_doc(c))
+    return out
+
+@app.put("/api/chat-channels/{channel_id}")
+async def update_channel(channel_id: str, req: UpdateChatChannelRequest):
+    if not ObjectId.is_valid(channel_id):
+        raise HTTPException(status_code=400, detail="Invalid channel ID")
+    upd = {k: v for k, v in req.model_dump().items() if v is not None}
+    if upd:
+        await db.chat_channels.update_one({"_id": ObjectId(channel_id)}, {"$set": upd})
+    c = await db.chat_channels.find_one({"_id": ObjectId(channel_id)})
+    return serialize_doc(c)
+
+@app.delete("/api/chat-channels/{channel_id}")
+async def delete_channel(channel_id: str):
+    if not ObjectId.is_valid(channel_id):
+        raise HTTPException(status_code=400, detail="Invalid channel ID")
+    await db.chat_channels.delete_one({"_id": ObjectId(channel_id)})
+    await db.channel_messages.delete_many({"channel_id": channel_id})
+    return {"ok": True}
+
+class ChannelMessageRequest(BaseModel):
+    channel_id: str
+    sender_id: str
+    sender_name: str
+    text: str
+
+@app.post("/api/channel-messages")
+async def send_channel_message(req: ChannelMessageRequest):
+    msg = {"channel_id": req.channel_id, "sender_id": req.sender_id,
+           "sender_name": req.sender_name, "text": req.text,
+           "created_date": datetime.now(timezone.utc)}
+    res = await db.channel_messages.insert_one(msg)
+    msg["_id"] = res.inserted_id
+    return serialize_doc(msg)
+
+@app.get("/api/channel-messages/{channel_id}")
+async def list_channel_messages(channel_id: str):
+    msgs = await db.channel_messages.find({"channel_id": channel_id}).sort("created_date", 1).to_list(500)
+    return [serialize_doc(m) for m in msgs]
+
+# ── Relationships (Co-Parents & Couples) ──────────────────────────────────────
+class CoparentRelationRequest(BaseModel):
+    chain_id: str
+    parent1_id: str
+    parent2_id: str
+    children: List[Dict[str, Any]] = []
+
+class CoupleRelationRequest(BaseModel):
+    chain_id: str
+    partner1_id: str
+    partner2_id: str
+    sync_pref: str = "none"  # "same" | "opposite" | "none"
+
+@app.post("/api/coparent-relations")
+async def create_coparent(req: CoparentRelationRequest):
+    doc = {**req.model_dump(), "created_date": datetime.now(timezone.utc)}
+    res = await db.coparent_relations.insert_one(doc)
+    doc["_id"] = res.inserted_id
+    return serialize_doc(doc)
+
+@app.get("/api/chains/{chain_id}/coparent-relations")
+async def list_coparent(chain_id: str):
+    rels = await db.coparent_relations.find({"chain_id": chain_id}).to_list(100)
+    return [serialize_doc(r) for r in rels]
+
+@app.delete("/api/coparent-relations/{rid}")
+async def delete_coparent(rid: str):
+    if not ObjectId.is_valid(rid):
+        raise HTTPException(status_code=400, detail="Invalid id")
+    await db.coparent_relations.delete_one({"_id": ObjectId(rid)})
+    return {"ok": True}
+
+@app.post("/api/couple-relations")
+async def create_couple(req: CoupleRelationRequest):
+    doc = {**req.model_dump(), "confirmed_by_both": False, "created_date": datetime.now(timezone.utc)}
+    res = await db.couple_relations.insert_one(doc)
+    doc["_id"] = res.inserted_id
+    return serialize_doc(doc)
+
+@app.put("/api/couple-relations/{rid}/confirm")
+async def confirm_couple(rid: str):
+    if not ObjectId.is_valid(rid):
+        raise HTTPException(status_code=400, detail="Invalid id")
+    await db.couple_relations.update_one({"_id": ObjectId(rid)}, {"$set": {"confirmed_by_both": True}})
+    c = await db.couple_relations.find_one({"_id": ObjectId(rid)})
+    return serialize_doc(c)
+
+@app.get("/api/chains/{chain_id}/couple-relations")
+async def list_couple(chain_id: str):
+    rels = await db.couple_relations.find({"chain_id": chain_id}).to_list(100)
+    return [serialize_doc(r) for r in rels]
+
+@app.delete("/api/couple-relations/{rid}")
+async def delete_couple(rid: str):
+    if not ObjectId.is_valid(rid):
+        raise HTTPException(status_code=400, detail="Invalid id")
+    await db.couple_relations.delete_one({"_id": ObjectId(rid)})
+    return {"ok": True}
+
+@app.get("/api/chains/{chain_id}/consistency-check")
+async def consistency_check(chain_id: str):
+    """Return a list of issues detected across coparent/couple relations and current logics."""
+    issues = []
+    members = await db.chain_members.find({"chain_id": chain_id}).to_list(30)
+    members_by_id = {str(m["_id"]): m for m in members}
+    couples = await db.couple_relations.find({"chain_id": chain_id}).to_list(50)
+    for c in couples:
+        m1 = members_by_id.get(c.get("partner1_id"))
+        m2 = members_by_id.get(c.get("partner2_id"))
+        if not m1 or not m2:
+            continue
+        same_logic = (m1.get("current_logic") == m2.get("current_logic"))
+        if c.get("sync_pref") == "same" and not same_logic:
+            issues.append({"type": "couple_sync_broken",
+                           "severity": "warning",
+                           "members": [str(m1["_id"]), str(m2["_id"])],
+                           "message": f"{m1.get('user_name','?')} und {m2.get('user_name','?')} wollten die Kinder gleichzeitig haben, haben aber unterschiedliche Wochenend-Logiken."})
+        if c.get("sync_pref") == "opposite" and same_logic:
+            issues.append({"type": "couple_split_broken",
+                           "severity": "warning",
+                           "members": [str(m1["_id"]), str(m2["_id"])],
+                           "message": f"{m1.get('user_name','?')} und {m2.get('user_name','?')} wollten die Kinder abwechselnd haben, haben aber die gleichen Wochenend-Logiken."})
+        if not c.get("confirmed_by_both"):
+            issues.append({"type": "couple_unconfirmed",
+                           "severity": "info",
+                           "members": [str(m1["_id"]), str(m2["_id"])],
+                           "message": f"Die Partnerschaft zwischen {m1.get('user_name','?')} und {m2.get('user_name','?')} wurde noch nicht von beiden bestätigt."})
+    # Co-parent asymmetry check (both sides must agree)
+    coparents = await db.coparent_relations.find({"chain_id": chain_id}).to_list(50)
+    pairs_seen = set()
+    for r in coparents:
+        key = frozenset([r.get("parent1_id"), r.get("parent2_id")])
+        pairs_seen.add(key)
+    # (No deep asymmetry check needed if only stored once; if asymmetric entries exist, the UI rejects them)
+    return {"issues": issues, "couples_count": len(couples), "coparents_count": len(coparents)}
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8001)

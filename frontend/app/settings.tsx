@@ -169,6 +169,18 @@ export default function SettingsScreen() {
             </View>
           </View>
 
+          {/* Beziehungen */}
+          <TouchableOpacity testID="relationships-btn" style={s.prefsBtn} onPress={() => router.push('/relationships')}>
+            <View style={s.prefsLeft}>
+              <Ionicons name="heart-outline" size={22} color="#5B3FD4" />
+              <View>
+                <Text style={s.prefsTitle}>Beziehungen</Text>
+                <Text style={s.prefsSub}>Co-Eltern · Partner*in · Kinder-Timing</Text>
+              </View>
+            </View>
+            <Ionicons name="chevron-forward" size={20} color="#6E7170" />
+          </TouchableOpacity>
+
           {/* Präferenzen bearbeiten */}
           <TouchableOpacity testID="edit-prefs-btn" style={s.prefsBtn} onPress={() => router.push('/setup-prefs?edit=1')}>
             <View style={s.prefsLeft}>

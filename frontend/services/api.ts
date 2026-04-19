@@ -64,4 +64,25 @@ export const api = {
 
   // Dev seed
   seedTestChain: () => req('POST', '/dev/seed-test-chain', {}),
+
+  // Chat Channels
+  listChannels: (chainId: string, viewerMemberId?: string) => {
+    const q = viewerMemberId ? `?viewer_member_id=${viewerMemberId}` : '';
+    return req('GET', `/chains/${chainId}/chat-channels${q}`);
+  },
+  createChannel: (data: any) => req('POST', '/chat-channels', data),
+  updateChannel: (channelId: string, data: any) => req('PUT', `/chat-channels/${channelId}`, data),
+  deleteChannel: (channelId: string) => req('DELETE', `/chat-channels/${channelId}`),
+  listChannelMessages: (channelId: string) => req('GET', `/channel-messages/${channelId}`),
+  sendChannelMessage: (data: any) => req('POST', '/channel-messages', data),
+
+  // Relationships
+  listCoparents: (chainId: string) => req('GET', `/chains/${chainId}/coparent-relations`),
+  createCoparent: (data: any) => req('POST', '/coparent-relations', data),
+  deleteCoparent: (rid: string) => req('DELETE', `/coparent-relations/${rid}`),
+  listCouples: (chainId: string) => req('GET', `/chains/${chainId}/couple-relations`),
+  createCouple: (data: any) => req('POST', '/couple-relations', data),
+  confirmCouple: (rid: string) => req('PUT', `/couple-relations/${rid}/confirm`, {}),
+  deleteCouple: (rid: string) => req('DELETE', `/couple-relations/${rid}`),
+  consistencyCheck: (chainId: string) => req('GET', `/chains/${chainId}/consistency-check`),
 };
