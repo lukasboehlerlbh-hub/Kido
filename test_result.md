@@ -158,6 +158,42 @@ backend:
         agent: "testing"
         comment: "Verified end-to-end: create chain → invitation → accept → set opposing preferences (even/odd) → POST /calculate-plan returns proposal_type='clean'. Both members vote 'accepted' via /weekend-plans/{plan_id}/vote → GET /chains/{id}/weekend-plan shows status='accepted'. Pivot-switch branch verified in court-strict test (pivot's current_logic gets updated on full acceptance, though skipped here because clean-plan had no pivot)."
 
+  - task: "NEW escalation model on WeekendPlan (stages 1_clean / 2_ungern / 3a_blockers / 3b_subgroups)"
+    implemented: true
+    working: true
+    file: "backend/server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: true
+        agent: "testing"
+        comment: "POST /api/chains/{id}/calculate-plan now returns escalation_stage, rejected_pivot_ids, reconsider_count, blockers, subgroups. On the 6-member seed scenario, stage='2_ungern', pivot=Anna, only Anna's vote is_active=True and vote='pending'; the other 5 votes have is_active=False and vote='na'. POST /api/weekend-plans/{id}/reconsider resets Anna's vote to pending, increments reconsider_count[anna_id] to 1, and updates kido_message. POST /api/weekend-plans/{id}/try-next-pivot (after Anna declines again) produces a new plan with escalation_stage='3a_blockers', rejected_pivot_ids containing Anna, and blockers containing Peter (court_strict→effective flex ext); only blockers have is_active=True. POST /api/weekend-plans/{id}/escalate-3b flips the stage to '3b_subgroups', populates a non-empty subgroups list (grouped by adjacent matching logic), and reactivates all 6 votes to is_active=True + vote='pending'. Vote endpoint's all_voted check correctly ignores is_active=False votes, and on stage 2_ungern acceptance the kido_message is replaced with the public announcement ('Herzlichen Dank! Dank des Entgegenkommens von Anna …')."
+
+  - task: "Ferien schema changes (title, wish_target_member_id, children_names, partner_status, visibility filter)"
+    implemented: true
+    working: true
+    file: "backend/server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: true
+        agent: "testing"
+        comment: "POST /api/holiday-wishes now accepts title, wish_target_member_id, children_names, and the new wish values (ich/partner/flexibel). Created a private wish (is_shared=False) from Anna targeting Peter with title 'Sommerreise' and children ['Mia','Tom'] – response includes all new fields plus partner_status='pending' by default. Visibility filter via GET /api/chains/{id}/holiday-wishes?viewer_member_id=xxx works correctly: creator (Anna) and target (Peter) both see the private wish, a third party (Tom) does NOT. After PUT is_shared=True, Tom sees it. PUT partner_status='accepted' persists correctly."
+
+  - task: "Dev seed /api/dev/seed-test-chain creates 6-member ungern scenario"
+    implemented: true
+    working: true
+    file: "backend/server.py"
+    stuck_count: 0
+    priority: "medium"
+    needs_retesting: false
+    status_history:
+      - working: true
+        agent: "testing"
+        comment: "POST /api/dev/seed-test-chain returns chain_id, 6 members (Anna host / Peter court_strict / Sara / Tom / Lisa / Max), conflict_scenario='ungern', pivot_member_name='Anna Muster'. A fresh POST /api/chains/{id}/calculate-plan against the seeded chain correctly returns escalation_stage='2_ungern' with all new fields populated. NOTE (minor): the plan inserted by the seed itself does not carry the new escalation fields (escalation_stage, rejected_pivot_ids, reconsider_count, blockers, subgroups, is_active on votes) – clients should call /calculate-plan after seeding to get a fully-populated plan. This does not affect functionality because every client flow that uses the new fields goes through /calculate-plan or /try-next-pivot, both of which populate them correctly."
+
   - task: "Holiday wishes CRUD + shared flag"
     implemented: true
     working: true
@@ -259,6 +295,34 @@ test_plan:
   test_priority: "high_first"
 
 agent_communication:
+  - agent: "testing"
+    message: |
+      NEW escalation model + ferien schema tests completed – 58/58 checks PASSED.
+      Test file: /app/backend_test_escalation.py.
+      Verified:
+      • POST /api/dev/seed-test-chain → fresh 6-member chain, conflict_scenario='ungern', pivot='Anna Muster'.
+      • POST /api/chains/{id}/calculate-plan on seeded chain → escalation_stage='2_ungern',
+        rejected_pivot_ids=[], reconsider_count={}, blockers=[], subgroups=None, pivot=Anna.
+        Anna's vote has is_active=True + vote='pending'; other 5 have is_active=False + vote='na'.
+      • Anna votes 'declined' → plan.status='partial' (all_voted check correctly ignores is_active=False).
+      • POST /reconsider → Anna's vote back to 'pending', reconsider_count[anna_id]=1, kido_message updated.
+      • Anna declines again → POST /try-next-pivot → new plan with escalation_stage='3a_blockers',
+        rejected_pivot_ids contains Anna, blockers=[Peter] (court_strict→effective flex 'ext'),
+        only blockers have is_active=True, others are 'na' + is_active=False.
+      • POST /escalate-3b → escalation_stage='3b_subgroups', subgroups populated (list of groups by
+        adjacent-same-logic clustering), all 6 votes reactivated (is_active=True + vote='pending').
+      • Ferien: POST /holiday-wishes accepts title, wish_target_member_id, children_names, wish='partner'.
+        GET visibility filter: creator + target see private wish; third party does NOT. After flipping
+        is_shared=True, third party also sees. PUT partner_status='accepted' persists correctly.
+      • Stage 2_ungern acceptance path: pivot accepts → status='accepted', kido_message replaced with
+        public announcement ('Herzlichen Dank! Dank des Entgegenkommens von Anna …').
+
+      Minor observation (not blocking): the plan inserted directly by /dev/seed-test-chain does NOT
+      carry the new escalation fields – only plans produced by /calculate-plan or /try-next-pivot do.
+      In practice every client path hits /calculate-plan after seeding, so no functional impact. Main
+      agent may want to align the seed to write the new fields for consistency, but this is optional.
+
+      No critical issues. All new endpoints are working as specified.
   - agent: "main"
     message: |
       Please test the backend focusing on three areas:

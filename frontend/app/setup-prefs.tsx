@@ -1,9 +1,9 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity, ScrollView,
   SafeAreaView, ActivityIndicator, Alert, KeyboardAvoidingView, Platform,
 } from 'react-native';
-import { router } from 'expo-router';
+import { router, useLocalSearchParams } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { api } from '../services/api';
 import { useUser } from '../context/UserContext';
@@ -60,10 +60,25 @@ const FLEX_OPTIONS = [
 
 export default function SetupPrefsScreen() {
   const { user, updateUser } = useUser();
+  const params = useLocalSearchParams<{ edit?: string }>();
+  const isEdit = params.edit === '1';
   const [court, setCourt] = useState('no_court');
   const [logic, setLogic] = useState('even');
   const [flex, setFlex] = useState('disc');
   const [loading, setLoading] = useState(false);
+  const [initialLoad, setInitialLoad] = useState(isEdit);
+
+  useEffect(() => {
+    if (!isEdit || !user?.chainMemberId) return;
+    api.getMember(user.chainMemberId)
+      .then((m: any) => {
+        setCourt(m.court_ruling || 'no_court');
+        setLogic(m.current_logic || 'even');
+        setFlex(m.flex_level || 'disc');
+      })
+      .catch(() => {})
+      .finally(() => setInitialLoad(false));
+  }, [isEdit, user?.chainMemberId]);
 
   const handleSave = async () => {
     if (!user?.chainMemberId) {
@@ -78,7 +93,12 @@ export default function SetupPrefsScreen() {
         flex_level: flex,
       });
       await updateUser({ prefsSet: true });
-      router.replace('/(tabs)/home');
+      if (isEdit) {
+        Alert.alert('Gespeichert', 'Deine Präferenzen wurden aktualisiert.');
+        router.back();
+      } else {
+        router.replace('/(tabs)/home');
+      }
     } catch (e: any) {
       Alert.alert('Fehler', e.message || 'Präferenzen konnten nicht gespeichert werden.');
     } finally {
@@ -86,16 +106,31 @@ export default function SetupPrefsScreen() {
     }
   };
 
+  if (initialLoad) {
+    return (
+      <SafeAreaView style={s.safe}>
+        <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
+          <ActivityIndicator color="#1D9E75" size="large" />
+        </View>
+      </SafeAreaView>
+    );
+  }
+
   return (
     <SafeAreaView style={s.safe}>
       <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={{ flex: 1 }}>
         <ScrollView contentContainerStyle={s.scroll} showsVerticalScrollIndicator={false}>
           <View style={s.headerRow}>
+            {isEdit && (
+              <TouchableOpacity onPress={() => router.back()} style={{ marginRight: 6 }}>
+                <Ionicons name="arrow-back" size={24} color="#1A1C1B" />
+              </TouchableOpacity>
+            )}
             <View style={s.logoSmall}>
               <Text style={s.logoLetter}>K</Text>
             </View>
-            <View>
-              <Text style={s.title}>Deine Präferenzen</Text>
+            <View style={{ flex: 1 }}>
+              <Text style={s.title}>{isEdit ? 'Präferenzen bearbeiten' : 'Deine Präferenzen'}</Text>
               <Text style={s.sub}>Nur du siehst diese Angaben – nicht die anderen.</Text>
             </View>
           </View>
@@ -186,7 +221,7 @@ export default function SetupPrefsScreen() {
             {loading
               ? <ActivityIndicator color="#fff" />
               : <>
-                <Text style={s.primaryBtnText}>Weiter zur Übersicht</Text>
+                <Text style={s.primaryBtnText}>{isEdit ? 'Änderungen speichern' : 'Weiter zur Übersicht'}</Text>
                 <Ionicons name="arrow-forward" size={20} color="#fff" />
               </>
             }

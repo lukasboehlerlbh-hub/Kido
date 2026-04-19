@@ -84,35 +84,85 @@ def get_effective_flex(member: dict) -> str:
         return "ext"
     return member.get("flex_level", "no")
 
-def calculate_plan(members):
+def calculate_plan(members, rejected_pivot_ids=None):
+    """Calculate weekend plan. If rejected_pivot_ids given, skip those members as pivot candidates."""
+    rejected_pivot_ids = rejected_pivot_ids or []
     member_ids = [str(m.get("id") or str(m.get("_id", ""))) for m in members]
     weekends = get_next_weekends(8)
     current = calc_schedule(members)
     conflicts = find_conflicts(current, member_ids)
     if not conflicts:
-        return {"type": "clean", "pivot_id": None, "pivot_name": None, "new_logic": None,
+        return {"type": "clean", "stage": "1_clean", "pivot_id": None, "pivot_name": None, "new_logic": None,
                 "schedule": current, "proposed_schedule": current, "weekends": weekends,
+                "blockers": [], "subgroups": None,
                 "kido_message": KIDO_MSG["clean"]}
     for c in sorted(members, key=lambda m: FLEX_SCORES.get(get_effective_flex(m), 0), reverse=True):
         if FLEX_SCORES.get(get_effective_flex(c), 0) <= 1:
             continue
         cid = str(c.get("id") or str(c.get("_id", "")))
+        if cid in rejected_pivot_ids:
+            continue
         nl = "odd" if c.get("current_logic","even") == "even" else "even"
         trial = calc_schedule(members, {cid: nl})
         if not find_conflicts(trial, member_ids):
             ungern = c.get("flex_level") in ["rel", "temp"]
-            return {"type": "ungern" if ungern else "clean", "pivot_id": cid,
+            stage = "2_ungern" if ungern else "1_clean"
+            return {"type": "ungern" if ungern else "clean", "stage": stage, "pivot_id": cid,
                     "pivot_name": c.get("user_name",""), "new_logic": nl,
                     "schedule": current, "proposed_schedule": trial, "weekends": weekends,
+                    "blockers": [], "subgroups": None,
                     "kido_message": KIDO_MSG["ungern"] if ungern else KIDO_MSG["clean"]}
-    return {"type": "blocked", "pivot_id": None, "pivot_name": None, "new_logic": None,
+
+    # All candidates exhausted → 3a (blockers) / 3b (subgroups)
+    blockers = compute_blockers(members, member_ids, current)
+    return {"type": "blocked", "stage": "3a_blockers", "pivot_id": None, "pivot_name": None, "new_logic": None,
             "schedule": current, "proposed_schedule": current, "weekends": weekends,
-            "kido_message": KIDO_MSG["blocked"]}
+            "blockers": blockers, "subgroups": None,
+            "kido_message": KIDO_MSG["blocked_3a"]}
+
+def compute_blockers(members, member_ids, current):
+    """Return member_ids that are involved in conflicts AND have low flex (effective ≤ 1)."""
+    conflicts = find_conflicts(current, member_ids)
+    conflicted_indices = set()
+    for c in conflicts:
+        conflicted_indices.add(c["pi"])
+        conflicted_indices.add(c["qi"])
+    blockers = []
+    for idx in conflicted_indices:
+        m = members[idx]
+        if FLEX_SCORES.get(get_effective_flex(m), 0) <= 1:
+            blockers.append(str(m.get("id") or str(m.get("_id", ""))))
+    return blockers
+
+def compute_subgroups(members):
+    """For stage 3b: cluster adjacent members with same logic into subgroups."""
+    if not members:
+        return []
+    groups = []
+    current_group = [{"id": str(members[0].get("id") or ""), "name": members[0].get("user_name", ""), "color": members[0].get("avatar_color","#1D9E75"), "logic": members[0].get("current_logic","even")}]
+    last_logic = members[0].get("current_logic", "even")
+    for m in members[1:]:
+        mlogic = m.get("current_logic", "even")
+        entry = {"id": str(m.get("id") or ""), "name": m.get("user_name",""), "color": m.get("avatar_color","#1D9E75"), "logic": mlogic}
+        if mlogic == last_logic:
+            # conflict – start new subgroup
+            groups.append(current_group)
+            current_group = [entry]
+        else:
+            current_group.append(entry)
+        last_logic = mlogic
+    groups.append(current_group)
+    return groups
 
 KIDO_MSG = {
     "clean": "Liebe Elternkette – ich habe eine Lösung gefunden, die für alle passen sollte. Bitte schaut euch den Vorschlag an.",
-    "ungern": "Kido hat eine mögliche Lösung gefunden – aber sie hängt an einer Person. Jemand müsste seine Wochenendlogik wechseln. Wenn diese Person bereit ist, löst das den Konflikt für die gesamte Kette.",
-    "blocked": "Kido hat alle Möglichkeiten durchgespielt. Leider gibt es derzeit keine Lösung, die für alle passt. Eine Mediation könnte helfen.",
+    "ungern": "Kido hat eine mögliche Lösung gefunden – aber sie hängt an einer Person. Wenn diese Person bereit ist, löst das den Konflikt für die gesamte Kette.",
+    "ungern_private": "Die ganze Kette hofft gerade auf dich. Mit deinem Wechsel auf {logic} Wochenenden wäre der Konflikt für alle gelöst. Möchtest du helfen?",
+    "ungern_reconsider": "Ich weiß, es ist nicht einfach. Möchtest du deine Entscheidung vielleicht nochmal überdenken? Deine Kinder und die ganze Kette würden es dir danken.",
+    "ungern_accepted_public": "Herzlichen Dank! Dank des Entgegenkommens von {name} ist der Wochenendplan für alle gelöst.",
+    "blocked_3a": "Kido hat alle Möglichkeiten durchgespielt. Einige Personen halten gerade an ihrer Position fest und blockieren eine Lösung.",
+    "blocked_3a_private": "Du hältst gerade eine Lösung für alle zurück. Bitte denke im Sinne deiner Kinder darüber nach, ob du deine Haltung überdenken kannst.",
+    "blocked_3b": "Es gibt unauflösbare Blockaden. Kido schlägt Subgruppen mit unterschiedlichen Logiken vor. Einige Paare sind dabei suboptimal gestellt.",
     "accepted": "Herzlichen Dank an alle. Ihr habt gemeinsam eine Lösung gefunden – das zeigt, dass ihr das Beste für eure Kinder wollt.",
 }
 
@@ -237,17 +287,24 @@ class HolidayWishRequest(BaseModel):
     year: int
     period_type: str
     period_label: str
+    title: Optional[str] = None
     date_from: str
     date_to: str
     wish: str
+    wish_target_member_id: Optional[str] = None  # When wish == specific person, points to that member
+    children_names: Optional[List[str]] = None
     is_shared: bool = False
     note: Optional[str] = None
 
 class UpdateHolidayWishRequest(BaseModel):
     wish: Optional[str] = None
+    wish_target_member_id: Optional[str] = None
     status: Optional[str] = None
     is_shared: Optional[bool] = None
     note: Optional[str] = None
+    title: Optional[str] = None
+    children_names: Optional[List[str]] = None
+    partner_status: Optional[str] = None  # acceptance from the target partner
 
 class SendMessageRequest(BaseModel):
     sender_id: str
@@ -437,24 +494,158 @@ async def calculate_weekend_plan(chain_id: str):
     members_data = [serialize_doc(m) for m in members]
     result = calculate_plan(members_data)
 
-    plan = {"chain_id": chain_id, "status": "proposed", "proposal_type": result["type"],
-            "pivot_member_id": result.get("pivot_id"), "pivot_member_name": result.get("pivot_name"),
-            "pivot_new_logic": result.get("new_logic"), "schedule": result["schedule"],
+    subgroups = compute_subgroups(members_data) if result.get("stage") == "3a_blockers" else None
+
+    plan = {"chain_id": chain_id, "status": "proposed",
+            "proposal_type": result["type"],
+            "escalation_stage": result.get("stage", "1_clean"),
+            "rejected_pivot_ids": [],
+            "reconsider_count": {},
+            "blockers": result.get("blockers", []),
+            "subgroups": None,  # only populated when 3b is reached
+            "pivot_member_id": result.get("pivot_id"),
+            "pivot_member_name": result.get("pivot_name"),
+            "pivot_new_logic": result.get("new_logic"),
+            "schedule": result["schedule"],
             "proposed_schedule": result["proposed_schedule"],
-            "weekends": result["weekends"], "kido_message": result["kido_message"],
+            "weekends": result["weekends"],
+            "kido_message": result["kido_message"],
             "created_date": datetime.now(timezone.utc)}
     plan_result = await db.weekend_plans.insert_one(plan)
     plan_id = str(plan_result.inserted_id)
 
+    stage = result.get("stage", "1_clean")
     for m in members_data:
-        vote = {"plan_id": plan_id, "member_id": m["id"], "member_name": m["user_name"],
-                "vote": "pending", "created_date": datetime.now(timezone.utc)}
+        mid = m["id"]
+        # Determine if this member should vote on this stage
+        # Stage 1: all vote. Stage 2: only pivot. Stage 3a: only blockers. Stage 3b: all.
+        if stage == "2_ungern":
+            is_active = mid == result.get("pivot_id")
+        elif stage == "3a_blockers":
+            is_active = mid in result.get("blockers", [])
+        else:
+            is_active = True
+        vote = {"plan_id": plan_id, "member_id": mid, "member_name": m["user_name"],
+                "vote": "pending" if is_active else "na",
+                "is_active": is_active,
+                "created_date": datetime.now(timezone.utc)}
         await db.plan_votes.insert_one(vote)
 
     plan["_id"] = plan_result.inserted_id
     plan_data = serialize_doc(plan)
-    plan_data["votes"] = []
+    votes = await db.plan_votes.find({"plan_id": plan_id}).to_list(20)
+    plan_data["votes"] = [serialize_doc(v) for v in votes]
+    plan_data["subgroups_preview"] = subgroups  # for UI preview at 3a
     return plan_data
+
+@app.post("/api/weekend-plans/{plan_id}/reconsider")
+async def reconsider_plan(plan_id: str):
+    """Stage 2 reconsider button: re-prompt the current pivot."""
+    if not ObjectId.is_valid(plan_id):
+        raise HTTPException(status_code=400, detail="Invalid plan ID")
+    plan = await db.weekend_plans.find_one({"_id": ObjectId(plan_id)})
+    if not plan:
+        raise HTTPException(status_code=404, detail="Plan not found")
+    pivot = plan.get("pivot_member_id")
+    if not pivot:
+        raise HTTPException(status_code=400, detail="No pivot to reconsider")
+    rc = plan.get("reconsider_count") or {}
+    rc[pivot] = rc.get(pivot, 0) + 1
+    # Reset pivot's vote to pending
+    await db.plan_votes.update_one(
+        {"plan_id": plan_id, "member_id": pivot},
+        {"$set": {"vote": "pending", "is_active": True}})
+    await db.weekend_plans.update_one(
+        {"_id": ObjectId(plan_id)},
+        {"$set": {"reconsider_count": rc,
+                  "kido_message": KIDO_MSG["ungern_reconsider"]}})
+    updated = await db.weekend_plans.find_one({"_id": ObjectId(plan_id)})
+    result = serialize_doc(updated)
+    votes = await db.plan_votes.find({"plan_id": plan_id}).to_list(20)
+    result["votes"] = [serialize_doc(v) for v in votes]
+    return result
+
+@app.post("/api/weekend-plans/{plan_id}/try-next-pivot")
+async def try_next_pivot(plan_id: str):
+    """Declined pivot: compute a new plan excluding declined pivots."""
+    if not ObjectId.is_valid(plan_id):
+        raise HTTPException(status_code=400, detail="Invalid plan ID")
+    plan = await db.weekend_plans.find_one({"_id": ObjectId(plan_id)})
+    if not plan:
+        raise HTTPException(status_code=404, detail="Plan not found")
+    chain_id = plan["chain_id"]
+    rejected = list(plan.get("rejected_pivot_ids") or [])
+    if plan.get("pivot_member_id") and plan["pivot_member_id"] not in rejected:
+        rejected.append(plan["pivot_member_id"])
+
+    members = await db.chain_members.find({"chain_id": chain_id}).sort("position", 1).to_list(20)
+    members_data = [serialize_doc(m) for m in members]
+    result = calculate_plan(members_data, rejected_pivot_ids=rejected)
+
+    now = datetime.now(timezone.utc)
+    subgroups = compute_subgroups(members_data) if result.get("stage") == "3a_blockers" else None
+    new_plan = {"chain_id": chain_id, "status": "proposed",
+                "proposal_type": result["type"],
+                "escalation_stage": result.get("stage", "1_clean"),
+                "rejected_pivot_ids": rejected,
+                "reconsider_count": {},
+                "blockers": result.get("blockers", []),
+                "subgroups": None,
+                "pivot_member_id": result.get("pivot_id"),
+                "pivot_member_name": result.get("pivot_name"),
+                "pivot_new_logic": result.get("new_logic"),
+                "schedule": result["schedule"],
+                "proposed_schedule": result["proposed_schedule"],
+                "weekends": result["weekends"],
+                "kido_message": result["kido_message"],
+                "created_date": now}
+    res = await db.weekend_plans.insert_one(new_plan)
+    new_id = str(res.inserted_id)
+    stage = result.get("stage", "1_clean")
+    for m in members_data:
+        mid = m["id"]
+        if stage == "2_ungern":
+            is_active = mid == result.get("pivot_id")
+        elif stage == "3a_blockers":
+            is_active = mid in result.get("blockers", [])
+        else:
+            is_active = True
+        await db.plan_votes.insert_one({"plan_id": new_id, "member_id": mid,
+                                        "member_name": m["user_name"],
+                                        "vote": "pending" if is_active else "na",
+                                        "is_active": is_active, "created_date": now})
+    new_plan["_id"] = res.inserted_id
+    data = serialize_doc(new_plan)
+    votes = await db.plan_votes.find({"plan_id": new_id}).to_list(20)
+    data["votes"] = [serialize_doc(v) for v in votes]
+    data["subgroups_preview"] = subgroups
+    return data
+
+@app.post("/api/weekend-plans/{plan_id}/escalate-3b")
+async def escalate_to_3b(plan_id: str):
+    """Move from 3a (blockers refuse) to 3b (subgroups)."""
+    if not ObjectId.is_valid(plan_id):
+        raise HTTPException(status_code=400, detail="Invalid plan ID")
+    plan = await db.weekend_plans.find_one({"_id": ObjectId(plan_id)})
+    if not plan:
+        raise HTTPException(status_code=404, detail="Plan not found")
+    chain_id = plan["chain_id"]
+    members = await db.chain_members.find({"chain_id": chain_id}).sort("position", 1).to_list(20)
+    members_data = [serialize_doc(m) for m in members]
+    subgroups = compute_subgroups(members_data)
+    now = datetime.now(timezone.utc)
+    await db.weekend_plans.update_one({"_id": ObjectId(plan_id)},
+        {"$set": {"escalation_stage": "3b_subgroups",
+                  "subgroups": subgroups,
+                  "kido_message": KIDO_MSG["blocked_3b"]}})
+    # Re-activate all votes
+    await db.plan_votes.update_many({"plan_id": plan_id},
+        {"$set": {"vote": "pending", "is_active": True}})
+    updated = await db.weekend_plans.find_one({"_id": ObjectId(plan_id)})
+    data = serialize_doc(updated)
+    votes = await db.plan_votes.find({"plan_id": plan_id}).to_list(20)
+    data["votes"] = [serialize_doc(v) for v in votes]
+    return data
 
 @app.post("/api/weekend-plans/{plan_id}/vote")
 async def vote_plan(plan_id: str, req: VoteRequest):
@@ -463,9 +654,10 @@ async def vote_plan(plan_id: str, req: VoteRequest):
     await db.plan_votes.update_one({"plan_id": plan_id, "member_id": req.member_id},
         {"$set": {"vote": req.vote, "voted_date": datetime.now(timezone.utc)}})
     votes = await db.plan_votes.find({"plan_id": plan_id}).to_list(20)
-    all_voted = all(v["vote"] != "pending" for v in votes)
+    active_votes = [v for v in votes if v.get("is_active", True)]
+    all_voted = all(v["vote"] != "pending" for v in active_votes)
     if all_voted:
-        all_accepted = all(v["vote"] == "accepted" for v in votes)
+        all_accepted = all(v["vote"] == "accepted" for v in active_votes)
         new_status = "accepted" if all_accepted else "partial"
         await db.weekend_plans.update_one({"_id": ObjectId(plan_id)},
             {"$set": {"status": new_status, "resolved_date": datetime.now(timezone.utc)}})
@@ -475,6 +667,10 @@ async def vote_plan(plan_id: str, req: VoteRequest):
                 await db.chain_members.update_one(
                     {"_id": ObjectId(plan["pivot_member_id"])},
                     {"$set": {"current_logic": plan["pivot_new_logic"]}})
+                # Public announcement for ungern accept
+                if plan.get("escalation_stage") == "2_ungern":
+                    await db.weekend_plans.update_one({"_id": ObjectId(plan_id)},
+                        {"$set": {"kido_message": KIDO_MSG["ungern_accepted_public"].format(name=plan.get("pivot_member_name",""))}})
     plan = await db.weekend_plans.find_one({"_id": ObjectId(plan_id)})
     result = serialize_doc(plan)
     result["votes"] = [serialize_doc(v) for v in votes]
@@ -482,19 +678,36 @@ async def vote_plan(plan_id: str, req: VoteRequest):
 
 # Holiday Wishes
 @app.get("/api/chains/{chain_id}/holiday-wishes")
-async def get_holiday_wishes(chain_id: str, year: Optional[int] = None):
+async def get_holiday_wishes(chain_id: str, year: Optional[int] = None, viewer_member_id: Optional[str] = None):
+    """Returns wishes visible to viewer_member_id.
+    Visibility rules:
+      - is_shared=True  → visible to everyone in chain
+      - is_shared=False → visible only to wish creator (member_id) + wish_target_member_id
+    """
     query = {"chain_id": chain_id}
     if year:
         query["year"] = year
-    wishes = await db.holiday_wishes.find(query).sort("date_from", 1).to_list(100)
-    return [serialize_doc(w) for w in wishes]
+    wishes = await db.holiday_wishes.find(query).sort("date_from", 1).to_list(200)
+    out = []
+    for w in wishes:
+        if w.get("is_shared") or not viewer_member_id:
+            out.append(w)
+            continue
+        if viewer_member_id == w.get("member_id") or viewer_member_id == w.get("wish_target_member_id"):
+            out.append(w)
+    return [serialize_doc(w) for w in out]
 
 @app.post("/api/holiday-wishes")
 async def create_holiday_wish(req: HolidayWishRequest):
     wish = {"member_id": req.member_id, "chain_id": req.chain_id, "year": req.year,
             "period_type": req.period_type, "period_label": req.period_label,
-            "date_from": req.date_from, "date_to": req.date_to, "wish": req.wish,
-            "status": "pending", "is_shared": req.is_shared, "note": req.note,
+            "title": req.title,
+            "date_from": req.date_from, "date_to": req.date_to,
+            "wish": req.wish,
+            "wish_target_member_id": req.wish_target_member_id,
+            "children_names": req.children_names or [],
+            "status": "pending", "partner_status": "pending",
+            "is_shared": req.is_shared, "note": req.note,
             "created_date": datetime.now(timezone.utc)}
     result = await db.holiday_wishes.insert_one(wish)
     wish["_id"] = result.inserted_id

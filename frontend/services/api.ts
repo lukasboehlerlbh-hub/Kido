@@ -38,10 +38,18 @@ export const api = {
   calculatePlan: (chainId: string) => req('POST', `/chains/${chainId}/calculate-plan`, {}),
   votePlan: (planId: string, memberId: string, vote: string) =>
     req('POST', `/weekend-plans/${planId}/vote`, { member_id: memberId, vote }),
+  reconsiderPlan: (planId: string) => req('POST', `/weekend-plans/${planId}/reconsider`, {}),
+  tryNextPivot: (planId: string) => req('POST', `/weekend-plans/${planId}/try-next-pivot`, {}),
+  escalateTo3b: (planId: string) => req('POST', `/weekend-plans/${planId}/escalate-3b`, {}),
 
   // Holiday Wishes
-  getHolidayWishes: (chainId: string, year?: number) =>
-    req('GET', `/chains/${chainId}/holiday-wishes${year ? `?year=${year}` : ''}`),
+  getHolidayWishes: (chainId: string, year?: number, viewerMemberId?: string) => {
+    const params = new URLSearchParams();
+    if (year) params.append('year', String(year));
+    if (viewerMemberId) params.append('viewer_member_id', viewerMemberId);
+    const q = params.toString();
+    return req('GET', `/chains/${chainId}/holiday-wishes${q ? `?${q}` : ''}`);
+  },
   createHolidayWish: (d: any) => req('POST', '/holiday-wishes', d),
   updateHolidayWish: (id: string, d: any) => req('PUT', `/holiday-wishes/${id}`, d),
 

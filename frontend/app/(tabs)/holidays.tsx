@@ -24,24 +24,32 @@ export default function HolidaysScreen() {
   const [year, setYear] = useState(2026);
   const [swissHols, setSwissHols] = useState<any[]>([]);
   const [wishes, setWishes] = useState<any[]>([]);
+  const [chain, setChain] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [addModal, setAddModal] = useState(false);
-  const [newWish, setNewWish] = useState({ period_type: 'sommer', period_label: 'Sommerferien', date_from: '', date_to: '', wish: 'flexibel', is_shared: false, note: '' });
+  const [newWish, setNewWish] = useState<any>({
+    title: '', period_type: 'sommer', period_label: 'Sommerferien',
+    date_from: '', date_to: '', wish: 'flexibel', wish_target_member_id: null,
+    is_shared: false, note: '', children_names: [] as string[],
+  });
+  const [childInput, setChildInput] = useState('');
   const [saving, setSaving] = useState(false);
 
   const load = useCallback(async () => {
     if (!user?.chainId) return;
     try {
-      const [hols, w] = await Promise.all([
+      const [hols, w, c] = await Promise.all([
         api.getSwissHolidays(kanton, year),
-        api.getHolidayWishes(user.chainId, year),
+        api.getHolidayWishes(user.chainId, year, user.chainMemberId),
+        api.getChain(user.chainId),
       ]);
       setSwissHols(hols);
       setWishes(w);
+      setChain(c);
     } catch (e) { console.error(e); }
     finally { setLoading(false); setRefreshing(false); }
-  }, [kanton, year, user?.chainId]);
+  }, [kanton, year, user?.chainId, user?.chainMemberId]);
 
   useEffect(() => { setLoading(true); load(); }, [kanton, year, load]);
 
@@ -54,6 +62,10 @@ export default function HolidaysScreen() {
       Alert.alert('Pflichtfelder', 'Bitte Datum von und bis eingeben (YYYY-MM-DD).');
       return;
     }
+    if (newWish.wish === 'partner' && !newWish.wish_target_member_id) {
+      Alert.alert('Pflichtfeld', 'Bitte Person auswählen mit der du die Ferien absprichst.');
+      return;
+    }
     setSaving(true);
     try {
       const w = await api.createHolidayWish({
@@ -62,23 +74,38 @@ export default function HolidaysScreen() {
         year,
         period_type: newWish.period_type,
         period_label: newWish.period_label,
+        title: newWish.title || undefined,
         date_from: newWish.date_from,
         date_to: newWish.date_to,
         wish: newWish.wish,
+        wish_target_member_id: newWish.wish === 'partner' ? newWish.wish_target_member_id : null,
+        children_names: newWish.children_names,
         is_shared: newWish.is_shared,
         note: newWish.note || undefined,
       });
       setWishes(prev => [...prev, w]);
       setAddModal(false);
-      setNewWish({ period_type: 'sommer', period_label: 'Sommerferien', date_from: '', date_to: '', wish: 'flexibel', is_shared: false, note: '' });
+      setNewWish({ title: '', period_type: 'sommer', period_label: 'Sommerferien', date_from: '', date_to: '', wish: 'flexibel', wish_target_member_id: null, is_shared: false, note: '', children_names: [] });
+      setChildInput('');
     } catch (e: any) {
       Alert.alert('Fehler', e.message);
     } finally { setSaving(false); }
   };
 
-  const handleRespondWish = async (wishId: string, status: 'accepted' | 'declined') => {
+  const handleAddChild = () => {
+    const v = childInput.trim();
+    if (!v) return;
+    setNewWish((p: any) => ({ ...p, children_names: [...(p.children_names || []), v] }));
+    setChildInput('');
+  };
+
+  const handleRemoveChild = (name: string) => {
+    setNewWish((p: any) => ({ ...p, children_names: (p.children_names || []).filter((c: string) => c !== name) }));
+  };
+
+  const handleRespondWish = async (wishId: string, field: 'status' | 'partner_status', value: 'accepted' | 'declined') => {
     try {
-      const updated = await api.updateHolidayWish(wishId, { status });
+      const updated = await api.updateHolidayWish(wishId, { [field]: value });
       setWishes(prev => prev.map(w => w.id === wishId ? updated : w));
     } catch (e: any) {
       Alert.alert('Fehler', e.message);
@@ -102,6 +129,10 @@ export default function HolidaysScreen() {
   }
 
   const sharedWishes = wishes.filter(w => w.is_shared && w.member_id !== user?.chainMemberId);
+  const privateToMe = wishes.filter(w => !w.is_shared && w.wish_target_member_id === user?.chainMemberId && w.member_id !== user?.chainMemberId);
+
+  const otherMembers = (chain?.members || []).filter((m: any) => m.id !== user?.chainMemberId);
+  const memberNameById = (mid: string) => (chain?.members || []).find((m: any) => m.id === mid)?.user_name || '?';
 
   return (
     <SafeAreaView style={s.safe}>
@@ -157,19 +188,77 @@ export default function HolidaysScreen() {
                 {myWish && (
                   <View style={[s.wishBadge, { backgroundColor: WISH_COLORS[myWish.wish] }]}>
                     <Text style={[s.wishBadgeText, { color: WISH_TEXT_COLORS[myWish.wish] }]}>
-                      {WISH_LABELS[myWish.wish]}
+                      {myWish.wish === 'partner' ? `mit ${memberNameById(myWish.wish_target_member_id)}` : WISH_LABELS[myWish.wish]}
                     </Text>
                   </View>
                 )}
               </View>
+              {myWish?.title && <Text style={s.wishTitle}>{myWish.title}</Text>}
+              {myWish?.children_names && myWish.children_names.length > 0 && (
+                <View style={s.childChips}>
+                  {myWish.children_names.map((c: string) => (
+                    <View key={c} style={s.childChip}><Text style={s.childChipText}>{c}</Text></View>
+                  ))}
+                </View>
+              )}
               {myWish && (
-                <View style={[s.statusBadge, { backgroundColor: STATUS_COLORS[myWish.status] || '#F0F2F1' }]}>
-                  <Text style={s.statusText}>{STATUS_TEXT[myWish.status] || myWish.status}</Text>
+                <View style={s.statusRow}>
+                  <View style={[s.statusBadge, { backgroundColor: STATUS_COLORS[myWish.status] || '#F0F2F1' }]}>
+                    <Text style={s.statusText}>{STATUS_TEXT[myWish.status] || myWish.status}</Text>
+                  </View>
+                  {myWish.wish === 'partner' && myWish.wish_target_member_id && (
+                    <View style={[s.statusBadge, { backgroundColor: STATUS_COLORS[myWish.partner_status] || '#F0F2F1' }]}>
+                      <Text style={s.statusText}>
+                        {memberNameById(myWish.wish_target_member_id).split(' ')[0]}: {STATUS_TEXT[myWish.partner_status] || 'Ausstehend'}
+                      </Text>
+                    </View>
+                  )}
+                  {myWish.is_shared && (
+                    <View style={[s.statusBadge, { backgroundColor: '#EEEDFE' }]}>
+                      <Text style={[s.statusText, { color: '#5B3FD4' }]}>✓ Mit Kette geteilt</Text>
+                    </View>
+                  )}
                 </View>
               )}
             </View>
           );
         })}
+
+        {/* Private invites to me */}
+        {privateToMe.length > 0 && (
+          <>
+            <Text style={s.sectionTitle}>Absprache-Anfragen an dich (privat)</Text>
+            {privateToMe.map((w: any) => (
+              <View key={w.id} style={[s.sharedCard, { borderLeftWidth: 3, borderLeftColor: '#5B3FD4' }]}>
+                <View style={s.sharedHeader}>
+                  <View style={[s.sharedAvatar, { backgroundColor: '#EEEDFE' }]}>
+                    <Text style={s.sharedAvatarText}>{memberNameById(w.member_id)?.[0]}</Text>
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={s.sharedLabel}>{w.title || w.period_label}</Text>
+                    <Text style={s.sharedDate}>{memberNameById(w.member_id)} · {w.date_from} – {w.date_to}</Text>
+                  </View>
+                </View>
+                {w.note && <Text style={s.sharedNote}>&quot;{w.note}&quot;</Text>}
+                {w.partner_status === 'pending' && (
+                  <View style={s.sharedActions}>
+                    <TouchableOpacity testID={`decline-partner-wish-${w.id}`} style={s.declineWishBtn} onPress={() => handleRespondWish(w.id, 'partner_status', 'declined')}>
+                      <Text style={s.declineWishText}>Ablehnen</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity testID={`accept-partner-wish-${w.id}`} style={s.acceptWishBtn} onPress={() => handleRespondWish(w.id, 'partner_status', 'accepted')}>
+                      <Text style={s.acceptWishText}>Annehmen</Text>
+                    </TouchableOpacity>
+                  </View>
+                )}
+                {w.partner_status !== 'pending' && (
+                  <View style={[s.statusBadge, { backgroundColor: STATUS_COLORS[w.partner_status], marginTop: 8 }]}>
+                    <Text style={s.statusText}>{STATUS_TEXT[w.partner_status]}</Text>
+                  </View>
+                )}
+              </View>
+            ))}
+          </>
+        )}
 
         {/* Shared Wishes from Others */}
         {sharedWishes.length > 0 && (
@@ -179,22 +268,31 @@ export default function HolidaysScreen() {
               <View key={w.id} style={s.sharedCard}>
                 <View style={s.sharedHeader}>
                   <View style={s.sharedAvatar}>
-                    <Text style={s.sharedAvatarText}>?</Text>
+                    <Text style={s.sharedAvatarText}>{memberNameById(w.member_id)?.[0]}</Text>
                   </View>
                   <View style={{ flex: 1 }}>
-                    <Text style={s.sharedLabel}>{w.period_label}</Text>
-                    <Text style={s.sharedDate}>{w.date_from} – {w.date_to}</Text>
+                    <Text style={s.sharedLabel}>{w.title || w.period_label}</Text>
+                    <Text style={s.sharedDate}>{memberNameById(w.member_id)} · {w.date_from} – {w.date_to}</Text>
                   </View>
                   <View style={[s.wishBadge, { backgroundColor: WISH_COLORS[w.wish] }]}>
-                    <Text style={[s.wishBadgeText, { color: WISH_TEXT_COLORS[w.wish] }]}>{WISH_LABELS[w.wish]}</Text>
+                    <Text style={[s.wishBadgeText, { color: WISH_TEXT_COLORS[w.wish] }]}>
+                      {w.wish === 'partner' ? `mit ${memberNameById(w.wish_target_member_id)?.split(' ')[0]}` : WISH_LABELS[w.wish]}
+                    </Text>
                   </View>
                 </View>
+                {w.children_names && w.children_names.length > 0 && (
+                  <View style={s.childChips}>
+                    {w.children_names.map((c: string) => (
+                      <View key={c} style={s.childChip}><Text style={s.childChipText}>{c}</Text></View>
+                    ))}
+                  </View>
+                )}
                 {w.status === 'pending' && (
                   <View style={s.sharedActions}>
-                    <TouchableOpacity testID={`decline-wish-${w.id}`} style={s.declineWishBtn} onPress={() => handleRespondWish(w.id, 'declined')}>
+                    <TouchableOpacity testID={`decline-wish-${w.id}`} style={s.declineWishBtn} onPress={() => handleRespondWish(w.id, 'status', 'declined')}>
                       <Text style={s.declineWishText}>Ablehnen</Text>
                     </TouchableOpacity>
-                    <TouchableOpacity testID={`accept-wish-${w.id}`} style={s.acceptWishBtn} onPress={() => handleRespondWish(w.id, 'accepted')}>
+                    <TouchableOpacity testID={`accept-wish-${w.id}`} style={s.acceptWishBtn} onPress={() => handleRespondWish(w.id, 'status', 'accepted')}>
                       <Text style={s.acceptWishText}>Annehmen</Text>
                     </TouchableOpacity>
                   </View>
@@ -212,33 +310,95 @@ export default function HolidaysScreen() {
             <View style={s.modalBox}>
               <Text style={s.modalTitle}>Ferienwunsch erfassen</Text>
               <ScrollView showsVerticalScrollIndicator={false}>
+                <Text style={s.modalLabel}>Titel (optional)</Text>
+                <TextInput testID="wish-title-input" style={s.modalInput} value={newWish.title} onChangeText={v => setNewWish((p: any) => ({ ...p, title: v }))} placeholder="z.B. Familie Camping Tessin" placeholderTextColor="#aaa" />
+
                 <Text style={s.modalLabel}>Ferientyp</Text>
                 <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8, marginBottom: 12 }}>
                   {PERIOD_TYPES.map(pt => (
                     <TouchableOpacity key={pt} testID={`period-type-${pt}`} style={[s.typePill, newWish.period_type === pt && s.typePillActive]}
-                      onPress={() => setNewWish(p => ({ ...p, period_type: pt, period_label: PERIOD_LABELS[pt] }))}>
+                      onPress={() => setNewWish((p: any) => ({ ...p, period_type: pt, period_label: PERIOD_LABELS[pt] }))}>
                       <Text style={[s.typePillText, newWish.period_type === pt && s.typePillTextActive]}>{PERIOD_LABELS[pt]}</Text>
                     </TouchableOpacity>
                   ))}
                 </ScrollView>
                 <Text style={s.modalLabel}>Von (YYYY-MM-DD)</Text>
-                <TextInput testID="date-from-input" style={s.modalInput} value={newWish.date_from} onChangeText={v => setNewWish(p => ({ ...p, date_from: v }))} placeholder={`${year}-07-07`} placeholderTextColor="#aaa" />
+                <TextInput testID="date-from-input" style={s.modalInput} value={newWish.date_from} onChangeText={v => setNewWish((p: any) => ({ ...p, date_from: v }))} placeholder={`${year}-07-07`} placeholderTextColor="#aaa" />
                 <Text style={s.modalLabel}>Bis (YYYY-MM-DD)</Text>
-                <TextInput testID="date-to-input" style={s.modalInput} value={newWish.date_to} onChangeText={v => setNewWish(p => ({ ...p, date_to: v }))} placeholder={`${year}-08-10`} placeholderTextColor="#aaa" />
+                <TextInput testID="date-to-input" style={s.modalInput} value={newWish.date_to} onChangeText={v => setNewWish((p: any) => ({ ...p, date_to: v }))} placeholder={`${year}-08-10`} placeholderTextColor="#aaa" />
+
+                <Text style={s.modalLabel}>Kinder</Text>
+                <View style={s.childInputRow}>
+                  <TextInput
+                    testID="child-name-input"
+                    style={[s.modalInput, { flex: 1, marginBottom: 0 }]}
+                    value={childInput}
+                    onChangeText={setChildInput}
+                    placeholder="Name hinzufügen"
+                    placeholderTextColor="#aaa"
+                    onSubmitEditing={handleAddChild}
+                  />
+                  <TouchableOpacity testID="add-child-btn" style={s.addChildBtn} onPress={handleAddChild}>
+                    <Ionicons name="add" size={20} color="#1D9E75" />
+                  </TouchableOpacity>
+                </View>
+                {newWish.children_names && newWish.children_names.length > 0 && (
+                  <View style={[s.childChips, { marginBottom: 14 }]}>
+                    {newWish.children_names.map((c: string) => (
+                      <TouchableOpacity key={c} style={s.childChipRemovable} onPress={() => handleRemoveChild(c)}>
+                        <Text style={s.childChipText}>{c}</Text>
+                        <Ionicons name="close" size={14} color="#6E7170" />
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+                )}
+
                 <Text style={s.modalLabel}>Mein Wunsch</Text>
                 <View style={s.wishRow}>
-                  {['ich', 'andere', 'flexibel'].map(w => (
+                  {['ich', 'partner', 'flexibel'].map(w => (
                     <TouchableOpacity key={w} testID={`wish-${w}`} style={[s.wishPill, newWish.wish === w && { backgroundColor: WISH_COLORS[w], borderColor: WISH_TEXT_COLORS[w] }]}
-                      onPress={() => setNewWish(p => ({ ...p, wish: w }))}>
+                      onPress={() => setNewWish((p: any) => ({ ...p, wish: w }))}>
                       <Text style={[s.wishPillText, newWish.wish === w && { color: WISH_TEXT_COLORS[w] }]}>{WISH_LABELS[w]}</Text>
                     </TouchableOpacity>
                   ))}
                 </View>
-                <TouchableOpacity testID="share-toggle" style={s.shareRow} onPress={() => setNewWish(p => ({ ...p, is_shared: !p.is_shared }))}>
+
+                {newWish.wish === 'partner' && (
+                  <>
+                    <Text style={s.modalLabel}>Mit welcher Person?</Text>
+                    <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8, marginBottom: 14 }}>
+                      {otherMembers.map((m: any) => (
+                        <TouchableOpacity
+                          key={m.id}
+                          testID={`target-${m.user_name.replace(/\s/g, '')}`}
+                          style={[s.memberPill, newWish.wish_target_member_id === m.id && { borderColor: m.avatar_color, backgroundColor: '#fff' }]}
+                          onPress={() => setNewWish((p: any) => ({ ...p, wish_target_member_id: m.id }))}
+                        >
+                          <View style={[s.mAvatar, { backgroundColor: m.avatar_color }]}>
+                            <Text style={s.mAvatarText}>{m.user_name[0]}</Text>
+                          </View>
+                          <Text style={s.memberPillText}>{m.user_name.split(' ')[0]}</Text>
+                        </TouchableOpacity>
+                      ))}
+                    </ScrollView>
+                  </>
+                )}
+
+                <TouchableOpacity testID="share-toggle" style={s.shareRow} onPress={() => setNewWish((p: any) => ({ ...p, is_shared: !p.is_shared }))}>
                   <Ionicons name={newWish.is_shared ? 'checkbox' : 'square-outline'} size={22} color="#1D9E75" />
-                  <Text style={s.shareText}>Mit Kette teilen</Text>
+                  <View style={{ flex: 1 }}>
+                    <Text style={s.shareText}>Mit ganzer Kette teilen</Text>
+                    <Text style={s.shareSub}>
+                      {newWish.is_shared
+                        ? 'Alle Kettenmitglieder sehen diesen Wunsch.'
+                        : newWish.wish === 'partner' && newWish.wish_target_member_id
+                          ? `Nur du und ${memberNameById(newWish.wish_target_member_id).split(' ')[0]} sehen das.`
+                          : 'Nur du siehst diesen Wunsch.'}
+                    </Text>
+                  </View>
                 </TouchableOpacity>
-                <TextInput testID="wish-note-input" style={[s.modalInput, { height: 72, textAlignVertical: 'top' }]} value={newWish.note} onChangeText={v => setNewWish(p => ({ ...p, note: v }))} placeholder="Bemerkung (optional)" multiline placeholderTextColor="#aaa" />
+
+                <TextInput testID="wish-note-input" style={[s.modalInput, { height: 72, textAlignVertical: 'top' }]} value={newWish.note} onChangeText={v => setNewWish((p: any) => ({ ...p, note: v }))} placeholder="Bemerkung (optional)" multiline placeholderTextColor="#aaa" />
                 <TouchableOpacity testID="save-wish-btn" style={[s.saveBtn, saving && { opacity: 0.7 }]} onPress={handleAddWish} disabled={saving}>
                   {saving ? <ActivityIndicator color="#fff" /> : <Text style={s.saveBtnText}>Speichern</Text>}
                 </TouchableOpacity>
@@ -305,8 +465,22 @@ const s = StyleSheet.create({
   wishRow: { flexDirection: 'row', gap: 8, marginBottom: 14 },
   wishPill: { flex: 1, paddingVertical: 10, borderRadius: 8, backgroundColor: '#F0F2F1', alignItems: 'center', borderWidth: 1, borderColor: 'transparent' },
   wishPillText: { fontSize: 13, fontWeight: '600', color: '#6E7170' },
-  shareRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 14 },
-  shareText: { fontSize: 14, color: '#1A1C1B' },
+  shareRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 10, marginBottom: 14, padding: 10, backgroundColor: '#F7F9F8', borderRadius: 8 },
+  shareText: { fontSize: 14, color: '#1A1C1B', fontWeight: '600' },
+  shareSub: { fontSize: 11, color: '#6E7170', marginTop: 2 },
+  wishTitle: { fontSize: 13, fontWeight: '600', color: '#1A1C1B', marginTop: 8, fontStyle: 'italic' },
+  childChips: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 8 },
+  childChip: { backgroundColor: '#E1F5EE', borderRadius: 12, paddingHorizontal: 10, paddingVertical: 4 },
+  childChipRemovable: { flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: '#E1F5EE', borderRadius: 12, paddingLeft: 10, paddingRight: 6, paddingVertical: 5 },
+  childChipText: { fontSize: 11, fontWeight: '600', color: '#1D9E75' },
+  childInputRow: { flexDirection: 'row', gap: 8, alignItems: 'center', marginBottom: 8 },
+  addChildBtn: { width: 44, height: 44, borderRadius: 8, borderWidth: 1, borderColor: '#1D9E75', backgroundColor: '#E1F5EE', alignItems: 'center', justifyContent: 'center' },
+  statusRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 8 },
+  memberPill: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: '#F0F2F1', paddingLeft: 4, paddingRight: 12, paddingVertical: 4, borderRadius: 20, borderWidth: 2, borderColor: 'transparent' },
+  memberPillText: { fontSize: 13, fontWeight: '600', color: '#1A1C1B' },
+  mAvatar: { width: 26, height: 26, borderRadius: 13, alignItems: 'center', justifyContent: 'center' },
+  mAvatarText: { fontSize: 12, fontWeight: '700', color: '#fff' },
+  sharedNote: { fontSize: 12, color: '#6E7170', fontStyle: 'italic', marginTop: 6 },
   saveBtn: { backgroundColor: '#1D9E75', borderRadius: 10, paddingVertical: 14, alignItems: 'center', marginTop: 4, marginBottom: 8 },
   saveBtnText: { color: '#fff', fontWeight: '600', fontSize: 16 },
   cancelText: { textAlign: 'center', color: '#6E7170', fontSize: 15, paddingVertical: 8 },

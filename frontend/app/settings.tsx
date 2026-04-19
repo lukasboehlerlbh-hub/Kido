@@ -169,6 +169,18 @@ export default function SettingsScreen() {
             </View>
           </View>
 
+          {/* Präferenzen bearbeiten */}
+          <TouchableOpacity testID="edit-prefs-btn" style={s.prefsBtn} onPress={() => router.push('/setup-prefs?edit=1')}>
+            <View style={s.prefsLeft}>
+              <Ionicons name="options-outline" size={22} color="#1D9E75" />
+              <View>
+                <Text style={s.prefsTitle}>Wochenend-Präferenzen bearbeiten</Text>
+                <Text style={s.prefsSub}>Gerichtsurteil · Logik · Flexibilität</Text>
+              </View>
+            </View>
+            <Ionicons name="chevron-forward" size={20} color="#6E7170" />
+          </TouchableOpacity>
+
           {/* Info */}
           <View style={s.section}>
             <Text style={s.sectionTitle}>Kette</Text>
@@ -292,6 +304,10 @@ const s = StyleSheet.create({
   logoutText: { color: '#E24B4A', fontWeight: '600', fontSize: 16 },
   switchBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, borderWidth: 1, borderColor: '#1D9E75', borderStyle: 'dashed', borderRadius: 10, paddingVertical: 12, marginBottom: 8, backgroundColor: '#F0FBF7' },
   switchText: { color: '#1D9E75', fontWeight: '600', fontSize: 14 },
+  prefsBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', backgroundColor: '#fff', borderRadius: 14, padding: 16, marginBottom: 14, shadowColor: '#000', shadowOpacity: 0.04, shadowRadius: 8, elevation: 1 },
+  prefsLeft: { flexDirection: 'row', alignItems: 'center', gap: 12, flex: 1 },
+  prefsTitle: { fontSize: 15, fontWeight: '600', color: '#1A1C1B' },
+  prefsSub: { fontSize: 12, color: '#6E7170', marginTop: 2 },
   resetBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, borderWidth: 1, borderColor: '#F4C27A', borderStyle: 'dashed', borderRadius: 10, paddingVertical: 12, marginBottom: 12, backgroundColor: '#FAEEDA' },
   resetText: { color: '#BA7517', fontWeight: '600', fontSize: 14 },
   versionText: { textAlign: 'center', fontSize: 11, color: '#bbb' },
