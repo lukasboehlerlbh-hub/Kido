@@ -790,31 +790,84 @@ async def get_swiss_holidays(kanton: str, year: int):
     return [{"kanton": kanton, "year": year, **h} for h in holidays]
 
 # ── Dev / Test Chain Seed ─────────────────────────────────────────────────────
-TEST_CHAIN_PHONE_PREFIX = "+41 79 001 00 "
-TEST_MEMBERS_SPEC = [
-    {"name": "Anna Muster",    "color": "#1D9E75", "logic": "even", "flex": "rel",  "court": "no_court",       "phone_suffix": "01", "is_host": True},
-    {"name": "Peter Muster",   "color": "#E24B4A", "logic": "even", "flex": "no",   "court": "court_strict",   "phone_suffix": "02", "is_host": False},
-    {"name": "Sara Beispiel",  "color": "#8B5CF6", "logic": "odd",  "flex": "disc", "court": "court_no_logic", "phone_suffix": "03", "is_host": False},
-    {"name": "Tom Testmann",   "color": "#F59E0B", "logic": "even", "flex": "disc", "court": "no_court",       "phone_suffix": "04", "is_host": False},
-    {"name": "Lisa Meier",     "color": "#60A5FA", "logic": "odd",  "flex": "no",   "court": "court_willing",  "phone_suffix": "05", "is_host": False},
-    {"name": "Max Keller",     "color": "#F472B6", "logic": "even", "flex": "temp", "court": "no_court",       "phone_suffix": "06", "is_host": False},
-]
+TEST_SCENARIOS: Dict[str, Dict[str, Any]] = {
+    "no_conflict": {
+        "label": "Szenario 1 – Keine Konflikte",
+        "description": "Alle Ex-Paare haben korrekte Alternierung. Kein Pivot nötig.",
+        "phone_prefix": "+41 79 100 00 ",
+        "members": [
+            # Couple A (pos 1-2)
+            {"name": "Elena Weber", "color": "#1D9E75", "logic": "even", "flex": "disc", "court": "no_court"},
+            {"name": "Daniel Weber", "color": "#E24B4A", "logic": "odd",  "flex": "disc", "court": "no_court"},
+            # Couple B (pos 3-4)
+            {"name": "Sophie Keller", "color": "#8B5CF6", "logic": "even", "flex": "disc", "court": "no_court"},
+            {"name": "Jonas Keller", "color": "#F59E0B", "logic": "odd",  "flex": "disc", "court": "no_court"},
+            # Couple C (pos 5-6)
+            {"name": "Lea Baumann", "color": "#60A5FA", "logic": "even", "flex": "disc", "court": "no_court"},
+            {"name": "Mats Baumann", "color": "#F472B6", "logic": "odd",  "flex": "disc", "court": "no_court"},
+        ],
+        "couples": [(0, 1, ["Emma", "Leo"]), (2, 3, ["Noah"]), (4, 5, ["Lina", "Ben"])],
+    },
+    "one_conflict": {
+        "label": "Szenario 2 – Ein lösbarer Konflikt",
+        "description": "Ex-Paar Keller hat ungewöhnlich gleiche Logik. Lösbar durch Ben (flex=yes).",
+        "phone_prefix": "+41 79 200 00 ",
+        "members": [
+            # Couple A: alternating (pos 1-2)
+            {"name": "Nora Fischer", "color": "#1D9E75", "logic": "odd",  "flex": "disc", "court": "no_court"},
+            {"name": "Finn Fischer",  "color": "#E24B4A", "logic": "even", "flex": "disc", "court": "no_court"},
+            # Couple B: alternating (pos 3-4)
+            {"name": "Mia Roth",      "color": "#8B5CF6", "logic": "odd",  "flex": "disc", "court": "no_court"},
+            {"name": "Lukas Roth",    "color": "#F59E0B", "logic": "even", "flex": "disc", "court": "no_court"},
+            # Couple C: BOTH odd (konflikt an 5-6), Ben ist flex=yes → lösbar
+            {"name": "Emma Kunz",     "color": "#60A5FA", "logic": "odd",  "flex": "disc", "court": "no_court"},
+            {"name": "Ben Kunz",      "color": "#F472B6", "logic": "odd",  "flex": "yes",  "court": "no_court"},
+        ],
+        "couples": [(0, 1, ["Luca"]), (2, 3, ["Sophia", "Max"]), (4, 5, ["Nele"])],
+    },
+    "two_conflicts": {
+        "label": "Szenario 3 – Zwei Konflikte (Eskalation)",
+        "description": "Zwei unabhängige Konflikte. Algorithmus eskaliert zu Stufe 3a.",
+        "phone_prefix": "+41 79 300 00 ",
+        "members": [
+            # Couple A: BOTH even (Konflikt 1 an 1-2), kein flex=yes
+            {"name": "Lina Graf",     "color": "#1D9E75", "logic": "even", "flex": "disc", "court": "no_court"},
+            {"name": "Marco Graf",    "color": "#E24B4A", "logic": "even", "flex": "rel",  "court": "court_strict"},
+            # Couple B: alternating (3-4)
+            {"name": "Clara Hunziker","color": "#8B5CF6", "logic": "odd",  "flex": "disc", "court": "no_court"},
+            {"name": "Luca Hunziker", "color": "#F59E0B", "logic": "even", "flex": "disc", "court": "no_court"},
+            # Couple C: BOTH even (Konflikt 2 an 5-6), Lea flex=no → blockiert
+            {"name": "Noah Steiner",  "color": "#60A5FA", "logic": "even", "flex": "disc", "court": "no_court"},
+            {"name": "Mila Steiner",  "color": "#F472B6", "logic": "even", "flex": "no",   "court": "court_strict"},
+        ],
+        "couples": [(0, 1, ["Anna", "Tim"]), (2, 3, ["Jana"]), (4, 5, ["Ella", "Jan"])],
+    },
+}
 
 @app.post("/api/dev/seed-test-chain")
-async def seed_test_chain():
-    """Wipe previous test chain and create a fresh 6-member chain with a solvable 'ungern' conflict.
-    Returns list of member login payloads the client can switch between."""
-    # 1) Remove previous test data (users with these phone numbers and their chains)
-    test_phones = [TEST_CHAIN_PHONE_PREFIX + m["phone_suffix"] for m in TEST_MEMBERS_SPEC]
+async def seed_test_chain(scenario: str = "one_conflict"):
+    """Wipe previous test chain (for the specified scenario) and create a fresh 6-member chain.
+    Available scenarios: 'no_conflict' | 'one_conflict' | 'two_conflicts'
+    """
+    if scenario not in TEST_SCENARIOS:
+        raise HTTPException(status_code=400, detail=f"Unknown scenario: {scenario}")
+    spec = TEST_SCENARIOS[scenario]
+    phone_prefix = spec["phone_prefix"]
+    member_specs = spec["members"]
+
+    # 1) Remove previous test data for this scenario
+    test_phones = [phone_prefix + f"{i+1:02d}" for i in range(len(member_specs))]
     old_users = await db.users.find({"phone": {"$in": test_phones}}).to_list(50)
     old_user_ids = [str(u["_id"]) for u in old_users]
     old_members = await db.chain_members.find({"user_id": {"$in": old_user_ids}}).to_list(50)
     old_chain_ids = list({m["chain_id"] for m in old_members})
-
     if old_chain_ids:
+        await db.channel_messages.delete_many({"channel_id": {"$in": [str(c["_id"]) for c in await db.chat_channels.find({"chain_id": {"$in": old_chain_ids}}).to_list(100)]}})
+        await db.chat_channels.delete_many({"chain_id": {"$in": old_chain_ids}})
+        await db.coparent_relations.delete_many({"chain_id": {"$in": old_chain_ids}})
+        await db.couple_relations.delete_many({"chain_id": {"$in": old_chain_ids}})
         await db.messages.delete_many({"chain_id": {"$in": old_chain_ids}})
         await db.holiday_wishes.delete_many({"chain_id": {"$in": old_chain_ids}})
-        await db.plan_votes.delete_many({})  # cleanup orphaned votes linked via plan_id
         await db.weekend_plans.delete_many({"chain_id": {"$in": old_chain_ids}})
         await db.chain_members.delete_many({"chain_id": {"$in": old_chain_ids}})
         await db.invitations.delete_many({"chain_id": {"$in": old_chain_ids}})
@@ -824,50 +877,46 @@ async def seed_test_chain():
 
     # 2) Create fresh chain + users + members
     now = datetime.now(timezone.utc)
-    # Create chain placeholder (host_id filled later)
-    chain_doc = {"name": "Test-Kette (6 Personen)", "host_id": "", "status": "active", "created_date": now}
+    chain_doc = {"name": spec["label"], "host_id": "", "status": "active", "created_date": now}
     chain_result = await db.chains.insert_one(chain_doc)
     chain_id = str(chain_result.inserted_id)
 
     created_members = []
     host_id = None
-    for idx, spec in enumerate(TEST_MEMBERS_SPEC):
-        phone = TEST_CHAIN_PHONE_PREFIX + spec["phone_suffix"]
-        user_doc = {"name": spec["name"], "phone": phone, "avatar_color": spec["color"],
-                    "is_host": spec["is_host"], "kanton": "ZH", "created_date": now}
+    for idx, m in enumerate(member_specs):
+        phone = phone_prefix + f"{idx+1:02d}"
+        is_host = (idx == 0)
+        user_doc = {"name": m["name"], "phone": phone, "avatar_color": m["color"],
+                    "is_host": is_host, "kanton": "ZH", "created_date": now}
         u_res = await db.users.insert_one(user_doc)
         user_id = str(u_res.inserted_id)
-        if spec["is_host"]:
+        if is_host:
             host_id = user_id
-
         member_doc = {"user_id": user_id, "chain_id": chain_id, "position": idx + 1,
-                      "user_name": spec["name"], "avatar_color": spec["color"],
-                      "court_ruling": spec["court"], "current_logic": spec["logic"],
-                      "flex_level": spec["flex"], "is_host": spec["is_host"],
-                      "joined_date": now}
+                      "user_name": m["name"], "avatar_color": m["color"],
+                      "court_ruling": m["court"], "current_logic": m["logic"],
+                      "flex_level": m["flex"], "is_host": is_host, "joined_date": now}
         m_res = await db.chain_members.insert_one(member_doc)
-        member_id = str(m_res.inserted_id)
-
         created_members.append({
-            "user_id": user_id,
-            "chain_id": chain_id,
-            "member_id": member_id,
-            "chain_name": chain_doc["name"],
-            "user_name": spec["name"],
-            "avatar_color": spec["color"],
-            "phone": phone,
-            "is_host": spec["is_host"],
-            "logic": spec["logic"],
-            "flex": spec["flex"],
-            "court": spec["court"],
-            "prefsSet": True,
-            "kanton": "ZH",
+            "user_id": user_id, "chain_id": chain_id, "member_id": str(m_res.inserted_id),
+            "chain_name": spec["label"], "user_name": m["name"], "avatar_color": m["color"],
+            "phone": phone, "is_host": is_host,
+            "logic": m["logic"], "flex": m["flex"], "court": m["court"], "prefsSet": True, "kanton": "ZH",
         })
 
-    # Update chain with host_id
     await db.chains.update_one({"_id": ObjectId(chain_id)}, {"$set": {"host_id": host_id}})
 
-    # 3) Pre-calculate a plan so the user immediately sees the "ungern" proposal
+    # 3) Create coparent relations per couple
+    for (i, j, children) in spec["couples"]:
+        await db.coparent_relations.insert_one({
+            "chain_id": chain_id,
+            "parent1_id": created_members[i]["member_id"],
+            "parent2_id": created_members[j]["member_id"],
+            "children": [{"name": n} for n in children],
+            "created_date": now,
+        })
+
+    # 4) Pre-calculate the plan
     members = await db.chain_members.find({"chain_id": chain_id}).sort("position", 1).to_list(20)
     members_data = [serialize_doc(m) for m in members]
     result = calculate_plan(members_data)
@@ -875,22 +924,21 @@ async def seed_test_chain():
     plan = {"chain_id": chain_id, "status": "proposed",
             "proposal_type": result["type"],
             "escalation_stage": stage,
-            "rejected_pivot_ids": [],
-            "reconsider_count": {},
-            "blockers": result.get("blockers", []),
-            "subgroups": None,
+            "rejected_pivot_ids": [], "reconsider_count": {},
+            "blockers": result.get("blockers", []), "subgroups": None,
             "pivot_member_id": result.get("pivot_id"),
             "pivot_member_name": result.get("pivot_name"),
             "pivot_new_logic": result.get("new_logic"),
             "schedule": result["schedule"],
             "proposed_schedule": result["proposed_schedule"],
             "weekends": result["weekends"],
-            "kido_message": result["kido_message"],
-            "created_date": now}
+            "kido_message": result["kido_message"], "created_date": now}
     plan_res = await db.weekend_plans.insert_one(plan)
     plan_id = str(plan_res.inserted_id)
+    cur_s = result["schedule"]; prop_s = result["proposed_schedule"]
     for m in members_data:
         mid = m["id"]
+        changes = cur_s.get(mid) != prop_s.get(mid)
         if stage == "2_ungern":
             is_active = mid == result.get("pivot_id")
         elif stage == "3a_blockers":
@@ -900,35 +948,18 @@ async def seed_test_chain():
         await db.plan_votes.insert_one({
             "plan_id": plan_id, "member_id": mid, "member_name": m["user_name"],
             "vote": "pending" if is_active else "na",
-            "is_active": is_active,
-            "created_date": now,
+            "is_active": is_active, "logic_changes": changes, "created_date": now,
         })
 
-    # 4) Seed a few holiday wishes (shared) so the picker works immediately
-    anna_member_id = created_members[0]["member_id"]
-    peter_member_id = created_members[1]["member_id"]
-    await db.holiday_wishes.insert_one({
-        "member_id": anna_member_id, "chain_id": chain_id, "year": 2026,
-        "period_type": "sommer", "period_label": "Sommerferien",
-        "date_from": "2026-07-13", "date_to": "2026-07-26",
-        "wish": "ich", "status": "pending", "is_shared": True,
-        "note": "Erste zwei Wochen bei mir (Anna).",
-        "created_date": now,
-    })
-    await db.holiday_wishes.insert_one({
-        "member_id": peter_member_id, "chain_id": chain_id, "year": 2026,
-        "period_type": "sommer", "period_label": "Sommerferien",
-        "date_from": "2026-07-27", "date_to": "2026-08-09",
-        "wish": "ich", "status": "pending", "is_shared": True,
-        "note": "Zweite Hälfte bei mir (Peter).",
-        "created_date": now,
-    })
-
     return {
+        "scenario": scenario,
         "chain_id": chain_id,
-        "chain_name": chain_doc["name"],
-        "conflict_scenario": "ungern" if result["type"] == "ungern" else result["type"],
+        "chain_name": spec["label"],
+        "description": spec["description"],
+        "conflict_scenario": stage,
+        "proposal_type": result["type"],
         "pivot_member_name": result.get("pivot_name"),
+        "blockers_count": len(result.get("blockers", [])),
         "members": created_members,
     }
 

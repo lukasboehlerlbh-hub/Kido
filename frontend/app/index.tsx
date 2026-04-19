@@ -29,10 +29,10 @@ export default function WelcomeScreen() {
     }
   }, [user, loading]);
 
-  const handleLoadTestChain = async () => {
+  const handleLoadTestChain = async (scenario: string) => {
     setSeeding(true);
     try {
-      const data = await api.seedTestChain();
+      const data = await api.seedTestChain(scenario);
       setSeedData(data);
       setTestChainModal(true);
     } catch (e: any) {
@@ -117,20 +117,45 @@ export default function WelcomeScreen() {
           <Ionicons name="arrow-forward" size={20} color="#fff" />
         </TouchableOpacity>
 
-        {/* Test Chain Loader */}
+        {/* Test Chain Loaders – 3 scenarios */}
+        <Text style={s.testLabel}>Test-Szenarien (Demo)</Text>
         <TouchableOpacity
-          testID="load-test-chain-btn"
-          style={s.testBtn}
-          onPress={handleLoadTestChain}
+          testID="load-scenario-no-conflict"
+          style={[s.testBtn, s.scenarioNoConflict]}
+          onPress={() => handleLoadTestChain('no_conflict')}
           disabled={seeding}
         >
-          {seeding
-            ? <ActivityIndicator color="#1D9E75" size="small" />
-            : <Ionicons name="flask-outline" size={18} color="#1D9E75" />
-          }
-          <Text style={s.testBtnText}>Test-Kette (6 Personen) laden</Text>
+          {seeding ? <ActivityIndicator color="#1D9E75" size="small" /> : <Ionicons name="checkmark-circle-outline" size={18} color="#1D9E75" />}
+          <View style={{ flex: 1 }}>
+            <Text style={s.testBtnText}>Szenario 1 – Keine Konflikte</Text>
+            <Text style={s.testBtnSub}>3 Ex-Paare, alles alternierend</Text>
+          </View>
         </TouchableOpacity>
-        <Text style={s.testHint}>Für Demo/Test: 6 Mitglieder, vordefinierter lösbarer Konflikt.</Text>
+        <TouchableOpacity
+          testID="load-scenario-one-conflict"
+          style={[s.testBtn, s.scenarioOneConflict]}
+          onPress={() => handleLoadTestChain('one_conflict')}
+          disabled={seeding}
+        >
+          {seeding ? <ActivityIndicator color="#BA7517" size="small" /> : <Ionicons name="flask-outline" size={18} color="#BA7517" />}
+          <View style={{ flex: 1 }}>
+            <Text style={[s.testBtnText, { color: '#BA7517' }]}>Szenario 2 – Ein Konflikt</Text>
+            <Text style={s.testBtnSub}>Lösbar durch Ben (flex=yes)</Text>
+          </View>
+        </TouchableOpacity>
+        <TouchableOpacity
+          testID="load-scenario-two-conflicts"
+          style={[s.testBtn, s.scenarioTwoConflicts]}
+          onPress={() => handleLoadTestChain('two_conflicts')}
+          disabled={seeding}
+        >
+          {seeding ? <ActivityIndicator color="#E24B4A" size="small" /> : <Ionicons name="warning-outline" size={18} color="#E24B4A" />}
+          <View style={{ flex: 1 }}>
+            <Text style={[s.testBtnText, { color: '#E24B4A' }]}>Szenario 3 – Zwei Konflikte</Text>
+            <Text style={s.testBtnSub}>Eskaliert zu Stufe 3a</Text>
+          </View>
+        </TouchableOpacity>
+        <Text style={s.testHint}>Jedes Szenario hat 3 Ex-Paare mit Co-Parent-Beziehungen und Kindern.</Text>
 
         <Text style={s.disclaimer}>Kido ersetzt keine rechtliche Beratung.</Text>
       </ScrollView>
@@ -215,8 +240,13 @@ const s = StyleSheet.create({
   featureDesc: { fontSize: 12, color: '#6E7170', lineHeight: 17 },
   primaryBtn: { backgroundColor: '#1D9E75', borderRadius: 10, paddingVertical: 16, alignItems: 'center', justifyContent: 'center', flexDirection: 'row', gap: 8, marginBottom: 14, shadowColor: '#1D9E75', shadowOpacity: 0.25, shadowRadius: 8, elevation: 3 },
   primaryBtnText: { color: '#fff', fontWeight: '600', fontSize: 17 },
-  testBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, backgroundColor: '#E1F5EE', borderRadius: 10, paddingVertical: 13, marginTop: 4, marginBottom: 6, borderWidth: 1, borderColor: '#1D9E75', borderStyle: 'dashed' },
-  testBtnText: { color: '#1D9E75', fontWeight: '600', fontSize: 14 },
+  testBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-start', gap: 12, borderRadius: 10, padding: 12, marginBottom: 8, borderWidth: 1, borderStyle: 'dashed' },
+  scenarioNoConflict: { backgroundColor: '#E1F5EE', borderColor: '#1D9E75' },
+  scenarioOneConflict: { backgroundColor: '#FAEEDA', borderColor: '#BA7517' },
+  scenarioTwoConflicts: { backgroundColor: '#FCEBEB', borderColor: '#E24B4A' },
+  testLabel: { fontSize: 12, fontWeight: '700', color: '#6E7170', letterSpacing: 1, marginTop: 14, marginBottom: 8 },
+  testBtnText: { color: '#1D9E75', fontWeight: '600', fontSize: 13 },
+  testBtnSub: { fontSize: 11, color: '#6E7170', marginTop: 1 },
   testHint: { textAlign: 'center', fontSize: 11, color: '#6E7170', marginBottom: 18, fontStyle: 'italic' },
   disclaimer: { textAlign: 'center', fontSize: 11, color: '#bbb' },
   overlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.4)', justifyContent: 'flex-end' },

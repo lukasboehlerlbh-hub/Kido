@@ -22,7 +22,10 @@ export default function SettingsScreen() {
   const [chainMembers, setChainMembers] = useState<any[]>([]);
   const [loadingMembers, setLoadingMembers] = useState(false);
 
-  const isTestChain = !!user?.userPhone?.startsWith('+41 79 001 00 ');
+  const isTestChain = !!user?.userPhone?.match(/^\+41 79 [123]00 00 /);
+  const scenarioFromPhone = user?.userPhone?.startsWith('+41 79 100') ? 'no_conflict'
+    : user?.userPhone?.startsWith('+41 79 200') ? 'one_conflict'
+    : user?.userPhone?.startsWith('+41 79 300') ? 'two_conflicts' : 'one_conflict';
 
   const handleOpenSwitch = async () => {
     if (!user?.chainId) return;
@@ -73,7 +76,7 @@ export default function SettingsScreen() {
           onPress: async () => {
             setSaving(true);
             try {
-              const data = await api.seedTestChain();
+              const data = await api.seedTestChain(scenarioFromPhone);
               // Find current user in new seed by matching name (phone also unique)
               const myNew = data.members.find((m: any) => m.phone === user?.userPhone);
               if (myNew) {

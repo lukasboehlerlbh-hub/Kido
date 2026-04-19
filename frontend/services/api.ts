@@ -63,7 +63,7 @@ export const api = {
   getSwissHolidays: (kanton: string, year: number) => req('GET', `/swiss-holidays/${kanton}/${year}`),
 
   // Dev seed
-  seedTestChain: () => req('POST', '/dev/seed-test-chain', {}),
+  seedTestChain: (scenario?: string) => req('POST', `/dev/seed-test-chain${scenario ? `?scenario=${scenario}` : ''}`, {}),
 
   // Chat Channels
   listChannels: (chainId: string, viewerMemberId?: string) => {
