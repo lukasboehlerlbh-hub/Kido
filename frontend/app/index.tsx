@@ -112,7 +112,7 @@ export default function WelcomeScreen() {
           ))}
         </View>
 
-        <TouchableOpacity testID="get-started-btn" style={s.primaryBtn} onPress={() => router.push('/onboarding')}>
+        <TouchableOpacity testID="get-started-btn" style={s.primaryBtn} onPress={() => router.push('/intro')}>
           <Text style={s.primaryBtnText}>Loslegen</Text>
           <Ionicons name="arrow-forward" size={20} color="#fff" />
         </TouchableOpacity>

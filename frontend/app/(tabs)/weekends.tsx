@@ -199,54 +199,38 @@ export default function WeekendsScreen() {
           </View>
         )}
 
-        {/* Stage 2 – Private Pivot Prompt */}
+        {/* Stage 2 – Private Pivot Prompt (shortcut to dedicated screen) */}
         {plan && stage === '2_ungern' && isPivot && plan.status === 'proposed' && (
-          <View style={s.privateCard}>
+          <TouchableOpacity testID="open-reconsider-btn" style={s.privateCard} onPress={() => router.push(`/reconsider?planId=${plan.id}&mode=ungern`)}>
             <View style={s.privateHeader}>
               <Ionicons name="person-circle" size={22} color="#BA7517" />
-              <Text style={s.privateTitle}>Nur für dich</Text>
+              <Text style={s.privateTitle}>Nur für dich – persönliche Nachricht</Text>
+              <Ionicons name="chevron-forward" size={20} color="#BA7517" style={{ marginLeft: 'auto' }} />
             </View>
             <Text style={s.privateMsg}>
-              Die ganze Kette hofft gerade auf dich. Mit deinem Wechsel auf {plan.pivot_new_logic === 'even' ? 'gerade' : 'ungerade'} Wochenenden wäre der Konflikt für alle gelöst.
+              Die ganze Kette hofft gerade auf dich. Tippe hier, um Kidos Nachricht zu lesen.
             </Text>
-            {myDeclinedStage2 && (
-              <TouchableOpacity testID="reconsider-btn" style={s.reconsiderBtn} onPress={handleReconsider}>
-                <Ionicons name="refresh-outline" size={18} color="#1D9E75" />
-                <Text style={s.reconsiderText}>Ich möchte es nochmal überdenken</Text>
-              </TouchableOpacity>
-            )}
             {myVote?.vote === 'declined' && (
-              <TouchableOpacity testID="try-next-btn" style={s.tryNextBtn} onPress={handleTryNext}>
-                <Ionicons name="swap-horizontal-outline" size={18} color="#5B3FD4" />
-                <Text style={s.tryNextText}>Andere Lösung probieren (anderes Mitglied fragen)</Text>
-              </TouchableOpacity>
+              <View style={{ flexDirection: 'row', gap: 8, marginTop: 10 }}>
+                <TouchableOpacity testID="try-next-btn" style={[s.tryNextBtn, { flex: 1 }]} onPress={(e) => { e.stopPropagation?.(); handleTryNext(); }}>
+                  <Ionicons name="swap-horizontal-outline" size={16} color="#5B3FD4" />
+                  <Text style={[s.tryNextText, { fontSize: 12 }]}>Andere Lösung probieren</Text>
+                </TouchableOpacity>
+              </View>
             )}
-          </View>
+          </TouchableOpacity>
         )}
 
-        {/* Stage 2 – non-pivot waiting */}
-        {plan && stage === '2_ungern' && !isPivot && plan.status === 'proposed' && (
-          <View style={s.waitCard}>
-            <Ionicons name="hourglass-outline" size={20} color="#6E7170" />
-            <Text style={s.waitText}>Kido spricht gerade privat mit einem Kettenmitglied. Sobald eine Entscheidung da ist, erfährst du es.</Text>
-          </View>
-        )}
-
-        {/* Stage 3a – Blocker private plea */}
+        {/* Stage 3a – Blocker link to reconsider screen */}
         {plan && stage === '3a_blockers' && isBlocker && plan.status === 'proposed' && (
-          <View style={s.privateCard}>
+          <TouchableOpacity testID="open-blocker-reconsider-btn" style={s.privateCard} onPress={() => router.push(`/reconsider?planId=${plan.id}&mode=blocker`)}>
             <View style={s.privateHeader}>
               <Ionicons name="alert-circle" size={22} color="#D87E28" />
               <Text style={s.privateTitle}>Nur für dich · vertraulich</Text>
+              <Ionicons name="chevron-forward" size={20} color="#D87E28" style={{ marginLeft: 'auto' }} />
             </View>
-            <Text style={s.privateMsg}>
-              Du hältst gerade eine Lösung für alle zurück. Bitte denke im Sinne deiner Kinder darüber nach, ob du deine Haltung überdenken kannst.
-            </Text>
-            <TouchableOpacity testID="edit-prefs-from-3a" style={s.tryNextBtn} onPress={() => router.push('/setup-prefs?edit=1')}>
-              <Ionicons name="options-outline" size={18} color="#5B3FD4" />
-              <Text style={s.tryNextText}>Präferenzen bearbeiten</Text>
-            </TouchableOpacity>
-          </View>
+            <Text style={s.privateMsg}>Tippe um Kidos persönliche Nachricht zu lesen.</Text>
+          </TouchableOpacity>
         )}
         {plan && stage === '3a_blockers' && !isBlocker && plan.status === 'proposed' && (
           <View style={s.waitCard}>

@@ -515,19 +515,25 @@ async def calculate_weekend_plan(chain_id: str):
     plan_id = str(plan_result.inserted_id)
 
     stage = result.get("stage", "1_clean")
+    current_sched = result["schedule"]
+    proposed_sched = result["proposed_schedule"]
     for m in members_data:
         mid = m["id"]
-        # Determine if this member should vote on this stage
-        # Stage 1: all vote. Stage 2: only pivot. Stage 3a: only blockers. Stage 3b: all.
+        # Active = logic actually changes in proposed vs current (CRITICAL: everyone with a logic change must explicitly vote, even if fully flexible)
+        changes = current_sched.get(mid) != proposed_sched.get(mid)
         if stage == "2_ungern":
             is_active = mid == result.get("pivot_id")
         elif stage == "3a_blockers":
             is_active = mid in result.get("blockers", [])
+        elif stage == "1_clean":
+            # Stage 1: everyone can vote; required voters are those with logic changes
+            is_active = True
         else:
             is_active = True
         vote = {"plan_id": plan_id, "member_id": mid, "member_name": m["user_name"],
                 "vote": "pending" if is_active else "na",
                 "is_active": is_active,
+                "logic_changes": changes,
                 "created_date": datetime.now(timezone.utc)}
         await db.plan_votes.insert_one(vote)
 
@@ -602,8 +608,10 @@ async def try_next_pivot(plan_id: str):
     res = await db.weekend_plans.insert_one(new_plan)
     new_id = str(res.inserted_id)
     stage = result.get("stage", "1_clean")
+    cur_s = result["schedule"]; prop_s = result["proposed_schedule"]
     for m in members_data:
         mid = m["id"]
+        changes = cur_s.get(mid) != prop_s.get(mid)
         if stage == "2_ungern":
             is_active = mid == result.get("pivot_id")
         elif stage == "3a_blockers":
@@ -613,7 +621,9 @@ async def try_next_pivot(plan_id: str):
         await db.plan_votes.insert_one({"plan_id": new_id, "member_id": mid,
                                         "member_name": m["user_name"],
                                         "vote": "pending" if is_active else "na",
-                                        "is_active": is_active, "created_date": now})
+                                        "is_active": is_active,
+                                        "logic_changes": changes,
+                                        "created_date": now})
     new_plan["_id"] = res.inserted_id
     data = serialize_doc(new_plan)
     votes = await db.plan_votes.find({"plan_id": new_id}).to_list(20)
@@ -655,9 +665,14 @@ async def vote_plan(plan_id: str, req: VoteRequest):
         {"$set": {"vote": req.vote, "voted_date": datetime.now(timezone.utc)}})
     votes = await db.plan_votes.find({"plan_id": plan_id}).to_list(20)
     active_votes = [v for v in votes if v.get("is_active", True)]
+    # Required = people whose logic changes (must all accept, regardless of flex level)
+    required_votes = [v for v in votes if v.get("logic_changes", False) and v.get("is_active", True)]
     all_voted = all(v["vote"] != "pending" for v in active_votes)
     if all_voted:
-        all_accepted = all(v["vote"] == "accepted" for v in active_votes)
+        # Plan accepted only if: no declines from active voters AND all required (logic-change) voters accepted
+        any_declined = any(v["vote"] == "declined" for v in active_votes)
+        all_required_accepted = all(v["vote"] == "accepted" for v in required_votes) if required_votes else True
+        all_accepted = (not any_declined) and all_required_accepted
         new_status = "accepted" if all_accepted else "partial"
         await db.weekend_plans.update_one({"_id": ObjectId(plan_id)},
             {"$set": {"status": new_status, "resolved_date": datetime.now(timezone.utc)}})
@@ -856,18 +871,37 @@ async def seed_test_chain():
     members = await db.chain_members.find({"chain_id": chain_id}).sort("position", 1).to_list(20)
     members_data = [serialize_doc(m) for m in members]
     result = calculate_plan(members_data)
-    plan = {"chain_id": chain_id, "status": "proposed", "proposal_type": result["type"],
-            "pivot_member_id": result.get("pivot_id"), "pivot_member_name": result.get("pivot_name"),
-            "pivot_new_logic": result.get("new_logic"), "schedule": result["schedule"],
+    stage = result.get("stage", "1_clean")
+    plan = {"chain_id": chain_id, "status": "proposed",
+            "proposal_type": result["type"],
+            "escalation_stage": stage,
+            "rejected_pivot_ids": [],
+            "reconsider_count": {},
+            "blockers": result.get("blockers", []),
+            "subgroups": None,
+            "pivot_member_id": result.get("pivot_id"),
+            "pivot_member_name": result.get("pivot_name"),
+            "pivot_new_logic": result.get("new_logic"),
+            "schedule": result["schedule"],
             "proposed_schedule": result["proposed_schedule"],
-            "weekends": result["weekends"], "kido_message": result["kido_message"],
+            "weekends": result["weekends"],
+            "kido_message": result["kido_message"],
             "created_date": now}
     plan_res = await db.weekend_plans.insert_one(plan)
     plan_id = str(plan_res.inserted_id)
     for m in members_data:
+        mid = m["id"]
+        if stage == "2_ungern":
+            is_active = mid == result.get("pivot_id")
+        elif stage == "3a_blockers":
+            is_active = mid in result.get("blockers", [])
+        else:
+            is_active = True
         await db.plan_votes.insert_one({
-            "plan_id": plan_id, "member_id": m["id"], "member_name": m["user_name"],
-            "vote": "pending", "created_date": now,
+            "plan_id": plan_id, "member_id": mid, "member_name": m["user_name"],
+            "vote": "pending" if is_active else "na",
+            "is_active": is_active,
+            "created_date": now,
         })
 
     # 4) Seed a few holiday wishes (shared) so the picker works immediately

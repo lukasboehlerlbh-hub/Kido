@@ -1,12 +1,22 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, SafeAreaView, TouchableOpacity,
   ActivityIndicator, Modal, TextInput, RefreshControl, Alert, KeyboardAvoidingView, Platform,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { Calendar, LocaleConfig } from 'react-native-calendars';
 import { useUser } from '../../context/UserContext';
 import { api } from '../../services/api';
 import { buildICS, addDays, exportICS } from '../../utils/icsExport';
+
+LocaleConfig.locales['de'] = {
+  monthNames: ['Januar','Februar','März','April','Mai','Juni','Juli','August','September','Oktober','November','Dezember'],
+  monthNamesShort: ['Jan','Feb','Mär','Apr','Mai','Jun','Jul','Aug','Sep','Okt','Nov','Dez'],
+  dayNames: ['Sonntag','Montag','Dienstag','Mittwoch','Donnerstag','Freitag','Samstag'],
+  dayNamesShort: ['So','Mo','Di','Mi','Do','Fr','Sa'],
+  today: 'Heute',
+};
+LocaleConfig.defaultLocale = 'de';
 
 const KANTONS = ['ZH', 'BE', 'SG', 'AG', 'BS'];
 const YEARS = [2026, 2027, 2028];
@@ -35,6 +45,58 @@ export default function HolidaysScreen() {
   });
   const [childInput, setChildInput] = useState('');
   const [saving, setSaving] = useState(false);
+  const [calendarModal, setCalendarModal] = useState(false);
+  const [calRange, setCalRange] = useState<{ from: string; to: string }>({ from: '', to: '' });
+
+  // Build marked dates for calendar: highlight Swiss school holidays + selected range
+  const markedDates = useMemo(() => {
+    const marks: Record<string, any> = {};
+    // Mark Swiss holidays as orange dots/background
+    swissHols.forEach((hol: any) => {
+      const d0 = new Date(hol.date_from + 'T00:00:00');
+      const d1 = new Date(hol.date_to + 'T00:00:00');
+      for (let d = new Date(d0); d <= d1; d.setDate(d.getDate() + 1)) {
+        const key = d.toISOString().slice(0, 10);
+        marks[key] = { marked: true, dotColor: '#BA7517', customStyles: { container: { backgroundColor: '#FAEEDA' } } };
+      }
+    });
+    // Overlay selected range (green)
+    if (calRange.from) {
+      const f = new Date(calRange.from + 'T00:00:00');
+      const t = new Date((calRange.to || calRange.from) + 'T00:00:00');
+      for (let d = new Date(f); d <= t; d.setDate(d.getDate() + 1)) {
+        const key = d.toISOString().slice(0, 10);
+        const isStart = key === calRange.from;
+        const isEnd = key === (calRange.to || calRange.from);
+        marks[key] = {
+          ...(marks[key] || {}),
+          customStyles: {
+            container: { backgroundColor: '#1D9E75', borderRadius: isStart || isEnd ? 8 : 0 },
+            text: { color: '#fff', fontWeight: '700' },
+          },
+        };
+      }
+    }
+    return marks;
+  }, [swissHols, calRange]);
+
+  const handleDayPress = (day: any) => {
+    const d = day.dateString;
+    if (!calRange.from || (calRange.from && calRange.to)) {
+      // Reset: start new range
+      setCalRange({ from: d, to: '' });
+    } else if (d < calRange.from) {
+      setCalRange({ from: d, to: calRange.from });
+    } else {
+      setCalRange({ from: calRange.from, to: d });
+    }
+  };
+
+  const confirmCalendarSelection = () => {
+    if (!calRange.from) return;
+    setNewWish((p: any) => ({ ...p, date_from: calRange.from, date_to: calRange.to || calRange.from }));
+    setCalendarModal(false);
+  };
 
   const load = useCallback(async () => {
     if (!user?.chainId) return;
@@ -322,10 +384,16 @@ export default function HolidaysScreen() {
                     </TouchableOpacity>
                   ))}
                 </ScrollView>
-                <Text style={s.modalLabel}>Von (YYYY-MM-DD)</Text>
-                <TextInput testID="date-from-input" style={s.modalInput} value={newWish.date_from} onChangeText={v => setNewWish((p: any) => ({ ...p, date_from: v }))} placeholder={`${year}-07-07`} placeholderTextColor="#aaa" />
-                <Text style={s.modalLabel}>Bis (YYYY-MM-DD)</Text>
-                <TextInput testID="date-to-input" style={s.modalInput} value={newWish.date_to} onChangeText={v => setNewWish((p: any) => ({ ...p, date_to: v }))} placeholder={`${year}-08-10`} placeholderTextColor="#aaa" />
+                <Text style={s.modalLabel}>Zeitraum</Text>
+                <TouchableOpacity testID="open-calendar-btn" style={s.calBtn} onPress={() => { setCalRange({ from: newWish.date_from, to: newWish.date_to }); setCalendarModal(true); }}>
+                  <Ionicons name="calendar-outline" size={20} color="#1D9E75" />
+                  <Text style={s.calBtnText}>
+                    {newWish.date_from && newWish.date_to
+                      ? `${new Date(newWish.date_from + 'T00:00:00').toLocaleDateString('de-CH')} – ${new Date(newWish.date_to + 'T00:00:00').toLocaleDateString('de-CH')}`
+                      : 'Zeitraum wählen (Kalender)'}
+                  </Text>
+                  <Ionicons name="chevron-forward" size={18} color="#1D9E75" style={{ marginLeft: 'auto' }} />
+                </TouchableOpacity>
 
                 <Text style={s.modalLabel}>Kinder</Text>
                 <View style={s.childInputRow}>
@@ -410,6 +478,49 @@ export default function HolidaysScreen() {
           </View>
         </KeyboardAvoidingView>
       </Modal>
+      {/* Calendar Picker Modal */}
+      <Modal visible={calendarModal} animationType="slide" transparent onRequestClose={() => setCalendarModal(false)}>
+        <View style={s.overlay}>
+          <View style={s.calModalBox}>
+            <View style={s.calHeader}>
+              <Text style={s.calHeaderTitle}>Zeitraum wählen</Text>
+              <TouchableOpacity onPress={() => setCalendarModal(false)} testID="close-calendar">
+                <Ionicons name="close" size={24} color="#6E7170" />
+              </TouchableOpacity>
+            </View>
+            <View style={s.calLegend}>
+              <View style={s.legendItem}><View style={[s.legendDot, { backgroundColor: '#FAEEDA' }]} /><Text style={s.legendText}>Schulferien {kanton}</Text></View>
+              <View style={s.legendItem}><View style={[s.legendDot, { backgroundColor: '#1D9E75' }]} /><Text style={s.legendText}>Auswahl</Text></View>
+            </View>
+            <Calendar
+              testID="calendar-picker"
+              markingType={'custom'}
+              markedDates={markedDates}
+              onDayPress={handleDayPress}
+              firstDay={1}
+              minDate={`${year}-01-01`}
+              maxDate={`${year}-12-31`}
+              current={`${year}-06-01`}
+              theme={{
+                todayTextColor: '#1D9E75',
+                arrowColor: '#1D9E75',
+                selectedDayBackgroundColor: '#1D9E75',
+                textMonthFontWeight: '700',
+              }}
+            />
+            <View style={s.calFooter}>
+              <Text style={s.calRangeText}>
+                {calRange.from
+                  ? `${new Date(calRange.from + 'T00:00:00').toLocaleDateString('de-CH')}${calRange.to ? ` – ${new Date(calRange.to + 'T00:00:00').toLocaleDateString('de-CH')}` : ' – …'}`
+                  : 'Noch nichts gewählt'}
+              </Text>
+              <TouchableOpacity testID="confirm-calendar-btn" style={[s.confirmBtn, !calRange.from && { opacity: 0.4 }]} onPress={confirmCalendarSelection} disabled={!calRange.from}>
+                <Text style={s.confirmBtnText}>Übernehmen</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -481,6 +592,19 @@ const s = StyleSheet.create({
   mAvatar: { width: 26, height: 26, borderRadius: 13, alignItems: 'center', justifyContent: 'center' },
   mAvatarText: { fontSize: 12, fontWeight: '700', color: '#fff' },
   sharedNote: { fontSize: 12, color: '#6E7170', fontStyle: 'italic', marginTop: 6 },
+  calBtn: { flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: '#E1F5EE', borderWidth: 1, borderColor: '#1D9E75', borderRadius: 10, paddingVertical: 14, paddingHorizontal: 14, marginBottom: 14 },
+  calBtnText: { fontSize: 14, color: '#1D9E75', fontWeight: '600', flex: 1 },
+  calModalBox: { backgroundColor: '#fff', borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: 16, maxHeight: '90%' },
+  calHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 },
+  calHeaderTitle: { fontSize: 18, fontWeight: '700', color: '#1A1C1B' },
+  calLegend: { flexDirection: 'row', gap: 16, marginBottom: 10, paddingHorizontal: 4 },
+  legendItem: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  legendDot: { width: 14, height: 14, borderRadius: 4 },
+  legendText: { fontSize: 12, color: '#6E7170' },
+  calFooter: { marginTop: 14, paddingTop: 14, borderTopWidth: 1, borderTopColor: '#E5E8E7' },
+  calRangeText: { fontSize: 14, color: '#1A1C1B', fontWeight: '600', marginBottom: 12, textAlign: 'center' },
+  confirmBtn: { backgroundColor: '#1D9E75', borderRadius: 10, paddingVertical: 14, alignItems: 'center' },
+  confirmBtnText: { color: '#fff', fontWeight: '700', fontSize: 15 },
   saveBtn: { backgroundColor: '#1D9E75', borderRadius: 10, paddingVertical: 14, alignItems: 'center', marginTop: 4, marginBottom: 8 },
   saveBtnText: { color: '#fff', fontWeight: '600', fontSize: 16 },
   cancelText: { textAlign: 'center', color: '#6E7170', fontSize: 15, paddingVertical: 8 },
