@@ -9,10 +9,38 @@ import { api } from '../services/api';
 import { useUser } from '../context/UserContext';
 
 const COURT_OPTIONS = [
-  { value: 'court_flex', label: 'Flexibel', desc: 'Urteil erlaubt Anpassungen' },
-  { value: 'court_reluctant', label: 'Ungern', desc: 'Urteil eher starr, Änderungen möglich' },
-  { value: 'court_strict', label: 'Strikt', desc: 'Urteil ist bindend' },
-  { value: 'no_court', label: 'Kein Urteil', desc: 'Keine gerichtliche Regelung' },
+  {
+    value: 'court_willing',
+    label: 'Urteil – bereit abzuweichen',
+    desc: 'Gerichtsurteil vorhanden, ich bin jedoch bereit, davon abzuweichen.',
+    badge: 'Flexibel',
+    badgeColor: '#E1F5EE',
+    badgeTextColor: '#1D9E75',
+  },
+  {
+    value: 'court_no_logic',
+    label: 'Urteil – keine Logik vorgegeben',
+    desc: 'Gerichtsurteil vorhanden, es gibt jedoch keine Wochenend-Logik vor.',
+    badge: 'Neutral',
+    badgeColor: '#F0F2F1',
+    badgeTextColor: '#6E7170',
+  },
+  {
+    value: 'court_strict',
+    label: 'Urteil – nicht abweichen',
+    desc: 'Gerichtsurteil vorhanden, ich bin NICHT bereit davon abzuweichen. Härteste Blockierhaltung.',
+    badge: 'Blockiert',
+    badgeColor: '#FCEBEB',
+    badgeTextColor: '#E24B4A',
+  },
+  {
+    value: 'no_court',
+    label: 'Kein Gerichtsurteil',
+    desc: 'Es liegt kein Gerichtsurteil vor.',
+    badge: 'Offen',
+    badgeColor: '#FAEEDA',
+    badgeTextColor: '#BA7517',
+  },
 ];
 
 const LOGIC_OPTIONS = [
@@ -94,6 +122,9 @@ export default function SetupPrefsScreen() {
                 <View style={{ flex: 1 }}>
                   <Text style={[s.optionLabel, court === opt.value && { color: '#1D9E75' }]}>{opt.label}</Text>
                   <Text style={s.optionDesc}>{opt.desc}</Text>
+                </View>
+                <View style={[s.scoreChip, { backgroundColor: opt.badgeColor }]}>
+                  <Text style={[s.scoreText, { color: opt.badgeTextColor }]}>{opt.badge}</Text>
                 </View>
               </TouchableOpacity>
             ))}

@@ -78,6 +78,12 @@ def find_conflicts(schedule, member_ids):
                 conflicts.append({"pi": i, "qi": i+1, "week": w})
     return conflicts
 
+def get_effective_flex(member: dict) -> str:
+    """court_strict overrides flex to ext (0) – hardest block."""
+    if member.get("court_ruling") == "court_strict":
+        return "ext"
+    return member.get("flex_level", "no")
+
 def calculate_plan(members):
     member_ids = [str(m.get("id") or str(m.get("_id", ""))) for m in members]
     weekends = get_next_weekends(8)
@@ -87,8 +93,8 @@ def calculate_plan(members):
         return {"type": "clean", "pivot_id": None, "pivot_name": None, "new_logic": None,
                 "schedule": current, "proposed_schedule": current, "weekends": weekends,
                 "kido_message": KIDO_MSG["clean"]}
-    for c in sorted(members, key=lambda m: FLEX_SCORES.get(m.get("flex_level","no"), 0), reverse=True):
-        if FLEX_SCORES.get(c.get("flex_level","no"), 0) <= 1:
+    for c in sorted(members, key=lambda m: FLEX_SCORES.get(get_effective_flex(m), 0), reverse=True):
+        if FLEX_SCORES.get(get_effective_flex(c), 0) <= 1:
             continue
         cid = str(c.get("id") or str(c.get("_id", "")))
         nl = "odd" if c.get("current_logic","even") == "even" else "even"
@@ -129,54 +135,74 @@ def get_kido_ai_response(text: str) -> str:
 # ── Swiss Holidays ─────────────────────────────────────────────────────────────
 SWISS_HOLIDAYS = {
     "ZH": {
-        2025: [{"type":"fruehling","label":"Frühlingsferien","date_from":"2025-04-07","date_to":"2025-04-18"},
-               {"type":"sommer","label":"Sommerferien","date_from":"2025-07-14","date_to":"2025-08-17"},
-               {"type":"herbst","label":"Herbstferien","date_from":"2025-10-04","date_to":"2025-10-19"},
-               {"type":"weihnachten","label":"Weihnachtsferien","date_from":"2025-12-22","date_to":"2026-01-04"}],
         2026: [{"type":"fruehling","label":"Frühlingsferien","date_from":"2026-04-06","date_to":"2026-04-17"},
                {"type":"sommer","label":"Sommerferien","date_from":"2026-07-13","date_to":"2026-08-16"},
                {"type":"herbst","label":"Herbstferien","date_from":"2026-10-03","date_to":"2026-10-18"},
                {"type":"weihnachten","label":"Weihnachtsferien","date_from":"2026-12-21","date_to":"2027-01-03"}],
+        2027: [{"type":"fruehling","label":"Frühlingsferien","date_from":"2027-03-29","date_to":"2027-04-09"},
+               {"type":"sommer","label":"Sommerferien","date_from":"2027-07-12","date_to":"2027-08-15"},
+               {"type":"herbst","label":"Herbstferien","date_from":"2027-10-09","date_to":"2027-10-24"},
+               {"type":"weihnachten","label":"Weihnachtsferien","date_from":"2027-12-22","date_to":"2028-01-02"}],
+        2028: [{"type":"fruehling","label":"Frühlingsferien","date_from":"2028-04-10","date_to":"2028-04-21"},
+               {"type":"sommer","label":"Sommerferien","date_from":"2028-07-10","date_to":"2028-08-13"},
+               {"type":"herbst","label":"Herbstferien","date_from":"2028-10-07","date_to":"2028-10-22"},
+               {"type":"weihnachten","label":"Weihnachtsferien","date_from":"2028-12-22","date_to":"2029-01-06"}],
     },
     "BE": {
-        2025: [{"type":"fruehling","label":"Frühlingsferien","date_from":"2025-04-12","date_to":"2025-04-26"},
-               {"type":"sommer","label":"Sommerferien","date_from":"2025-07-14","date_to":"2025-08-17"},
-               {"type":"herbst","label":"Herbstferien","date_from":"2025-10-11","date_to":"2025-10-26"},
-               {"type":"weihnachten","label":"Weihnachtsferien","date_from":"2025-12-22","date_to":"2026-01-04"}],
         2026: [{"type":"fruehling","label":"Frühlingsferien","date_from":"2026-04-11","date_to":"2026-04-25"},
                {"type":"sommer","label":"Sommerferien","date_from":"2026-07-13","date_to":"2026-08-16"},
                {"type":"herbst","label":"Herbstferien","date_from":"2026-10-10","date_to":"2026-10-25"},
                {"type":"weihnachten","label":"Weihnachtsferien","date_from":"2026-12-21","date_to":"2027-01-03"}],
+        2027: [{"type":"fruehling","label":"Frühlingsferien","date_from":"2027-04-03","date_to":"2027-04-17"},
+               {"type":"sommer","label":"Sommerferien","date_from":"2027-07-12","date_to":"2027-08-15"},
+               {"type":"herbst","label":"Herbstferien","date_from":"2027-10-16","date_to":"2027-10-31"},
+               {"type":"weihnachten","label":"Weihnachtsferien","date_from":"2027-12-22","date_to":"2028-01-02"}],
+        2028: [{"type":"fruehling","label":"Frühlingsferien","date_from":"2028-04-06","date_to":"2028-04-20"},
+               {"type":"sommer","label":"Sommerferien","date_from":"2028-07-10","date_to":"2028-08-13"},
+               {"type":"herbst","label":"Herbstferien","date_from":"2028-10-14","date_to":"2028-10-29"},
+               {"type":"weihnachten","label":"Weihnachtsferien","date_from":"2028-12-22","date_to":"2029-01-06"}],
     },
     "SG": {
-        2025: [{"type":"fruehling","label":"Frühlingsferien","date_from":"2025-04-14","date_to":"2025-04-25"},
-               {"type":"sommer","label":"Sommerferien","date_from":"2025-07-07","date_to":"2025-08-10"},
-               {"type":"herbst","label":"Herbstferien","date_from":"2025-10-04","date_to":"2025-10-19"},
-               {"type":"weihnachten","label":"Weihnachtsferien","date_from":"2025-12-20","date_to":"2026-01-04"}],
         2026: [{"type":"fruehling","label":"Frühlingsferien","date_from":"2026-04-13","date_to":"2026-04-24"},
                {"type":"sommer","label":"Sommerferien","date_from":"2026-07-06","date_to":"2026-08-09"},
                {"type":"herbst","label":"Herbstferien","date_from":"2026-10-03","date_to":"2026-10-18"},
                {"type":"weihnachten","label":"Weihnachtsferien","date_from":"2026-12-19","date_to":"2027-01-03"}],
+        2027: [{"type":"fruehling","label":"Frühlingsferien","date_from":"2027-04-12","date_to":"2027-04-23"},
+               {"type":"sommer","label":"Sommerferien","date_from":"2027-07-05","date_to":"2027-08-08"},
+               {"type":"herbst","label":"Herbstferien","date_from":"2027-10-09","date_to":"2027-10-24"},
+               {"type":"weihnachten","label":"Weihnachtsferien","date_from":"2027-12-20","date_to":"2028-01-02"}],
+        2028: [{"type":"fruehling","label":"Frühlingsferien","date_from":"2028-04-10","date_to":"2028-04-21"},
+               {"type":"sommer","label":"Sommerferien","date_from":"2028-07-03","date_to":"2028-08-06"},
+               {"type":"herbst","label":"Herbstferien","date_from":"2028-10-07","date_to":"2028-10-22"},
+               {"type":"weihnachten","label":"Weihnachtsferien","date_from":"2028-12-21","date_to":"2029-01-05"}],
     },
     "AG": {
-        2025: [{"type":"fruehling","label":"Frühlingsferien","date_from":"2025-04-19","date_to":"2025-05-03"},
-               {"type":"sommer","label":"Sommerferien","date_from":"2025-07-07","date_to":"2025-08-17"},
-               {"type":"herbst","label":"Herbstferien","date_from":"2025-10-04","date_to":"2025-10-19"},
-               {"type":"weihnachten","label":"Weihnachtsferien","date_from":"2025-12-22","date_to":"2026-01-04"}],
         2026: [{"type":"fruehling","label":"Frühlingsferien","date_from":"2026-04-18","date_to":"2026-05-02"},
                {"type":"sommer","label":"Sommerferien","date_from":"2026-07-06","date_to":"2026-08-16"},
                {"type":"herbst","label":"Herbstferien","date_from":"2026-10-03","date_to":"2026-10-18"},
                {"type":"weihnachten","label":"Weihnachtsferien","date_from":"2026-12-21","date_to":"2027-01-03"}],
+        2027: [{"type":"fruehling","label":"Frühlingsferien","date_from":"2027-04-19","date_to":"2027-05-03"},
+               {"type":"sommer","label":"Sommerferien","date_from":"2027-07-05","date_to":"2027-08-15"},
+               {"type":"herbst","label":"Herbstferien","date_from":"2027-10-09","date_to":"2027-10-24"},
+               {"type":"weihnachten","label":"Weihnachtsferien","date_from":"2027-12-22","date_to":"2028-01-02"}],
+        2028: [{"type":"fruehling","label":"Frühlingsferien","date_from":"2028-04-17","date_to":"2028-05-01"},
+               {"type":"sommer","label":"Sommerferien","date_from":"2028-07-03","date_to":"2028-08-13"},
+               {"type":"herbst","label":"Herbstferien","date_from":"2028-10-07","date_to":"2028-10-22"},
+               {"type":"weihnachten","label":"Weihnachtsferien","date_from":"2028-12-22","date_to":"2029-01-06"}],
     },
     "BS": {
-        2025: [{"type":"fruehling","label":"Frühlingsferien","date_from":"2025-04-14","date_to":"2025-04-24"},
-               {"type":"sommer","label":"Sommerferien","date_from":"2025-07-07","date_to":"2025-08-17"},
-               {"type":"herbst","label":"Herbstferien","date_from":"2025-10-04","date_to":"2025-10-19"},
-               {"type":"weihnachten","label":"Weihnachtsferien","date_from":"2025-12-22","date_to":"2026-01-04"}],
         2026: [{"type":"fruehling","label":"Frühlingsferien","date_from":"2026-04-13","date_to":"2026-04-23"},
                {"type":"sommer","label":"Sommerferien","date_from":"2026-07-06","date_to":"2026-08-16"},
                {"type":"herbst","label":"Herbstferien","date_from":"2026-10-03","date_to":"2026-10-18"},
                {"type":"weihnachten","label":"Weihnachtsferien","date_from":"2026-12-21","date_to":"2027-01-03"}],
+        2027: [{"type":"fruehling","label":"Frühlingsferien","date_from":"2027-04-12","date_to":"2027-04-22"},
+               {"type":"sommer","label":"Sommerferien","date_from":"2027-07-05","date_to":"2027-08-15"},
+               {"type":"herbst","label":"Herbstferien","date_from":"2027-10-09","date_to":"2027-10-24"},
+               {"type":"weihnachten","label":"Weihnachtsferien","date_from":"2027-12-22","date_to":"2028-01-02"}],
+        2028: [{"type":"fruehling","label":"Frühlingsferien","date_from":"2028-04-10","date_to":"2028-04-20"},
+               {"type":"sommer","label":"Sommerferien","date_from":"2028-07-03","date_to":"2028-08-13"},
+               {"type":"herbst","label":"Herbstferien","date_from":"2028-10-07","date_to":"2028-10-22"},
+               {"type":"weihnachten","label":"Weihnachtsferien","date_from":"2028-12-22","date_to":"2029-01-05"}],
     },
 }
 

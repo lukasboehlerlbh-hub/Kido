@@ -6,9 +6,10 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { useUser } from '../../context/UserContext';
 import { api } from '../../services/api';
+import { buildICS, addDays, exportICS } from '../../utils/icsExport';
 
 const KANTONS = ['ZH', 'BE', 'SG', 'AG', 'BS'];
-const YEARS = [2025, 2026];
+const YEARS = [2026, 2027, 2028];
 const WISH_LABELS: Record<string, string> = { ich: 'Ich', andere: 'Andere', flexibel: 'Flexibel' };
 const WISH_COLORS: Record<string, string> = { ich: '#E1F5EE', andere: '#FAEEDA', flexibel: '#F0F2F1' };
 const WISH_TEXT_COLORS: Record<string, string> = { ich: '#1D9E75', andere: '#BA7517', flexibel: '#6E7170' };
@@ -20,7 +21,7 @@ const PERIOD_LABELS: Record<string, string> = { fruehling: 'Frühlingsferien', s
 export default function HolidaysScreen() {
   const { user } = useUser();
   const [kanton, setKanton] = useState(user?.kanton || 'ZH');
-  const [year, setYear] = useState(new Date().getFullYear() < 2026 ? 2025 : 2026);
+  const [year, setYear] = useState(2026);
   const [swissHols, setSwissHols] = useState<any[]>([]);
   const [wishes, setWishes] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -84,6 +85,18 @@ export default function HolidaysScreen() {
     }
   };
 
+  const handleExportICS = async () => {
+    const events = swissHols.map(h => ({
+      uid: `kido-hol-${kanton}-${h.date_from}@kido.app`,
+      start: h.date_from,
+      end: addDays(h.date_to, 1),
+      summary: `Schulferien ${kanton}: ${h.label}`,
+      description: `Kido – Schulferien ${kanton} ${year}`,
+    }));
+    const ics = buildICS(events, `Kido Ferien ${kanton} ${year}`);
+    await exportICS(ics, `kido-ferien-${kanton}-${year}.ics`);
+  };
+
   if (loading) {
     return <SafeAreaView style={s.safe}><View style={s.center}><ActivityIndicator color="#1D9E75" size="large" /></View></SafeAreaView>;
   }
@@ -97,9 +110,14 @@ export default function HolidaysScreen() {
 
         <View style={s.titleRow}>
           <Text style={s.pageTitle}>Ferienplanung</Text>
-          <TouchableOpacity testID="add-wish-btn" style={s.addBtn} onPress={() => setAddModal(true)}>
-            <Ionicons name="add" size={22} color="#fff" />
-          </TouchableOpacity>
+          <View style={{ flexDirection: 'row', gap: 8 }}>
+            <TouchableOpacity testID="export-ics-btn" style={s.exportBtn} onPress={handleExportICS}>
+              <Ionicons name="calendar-outline" size={20} color="#1D9E75" />
+            </TouchableOpacity>
+            <TouchableOpacity testID="add-wish-btn" style={s.addBtn} onPress={() => setAddModal(true)}>
+              <Ionicons name="add" size={22} color="#fff" />
+            </TouchableOpacity>
+          </View>
         </View>
 
         {/* Canton Selector */}
@@ -243,6 +261,7 @@ const s = StyleSheet.create({
   titleRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 },
   pageTitle: { fontSize: 22, fontWeight: '700', color: '#1A1C1B' },
   addBtn: { width: 44, height: 44, borderRadius: 22, backgroundColor: '#1D9E75', alignItems: 'center', justifyContent: 'center' },
+  exportBtn: { width: 44, height: 44, borderRadius: 22, backgroundColor: '#E1F5EE', alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: '#1D9E75' },
   kantonRow: { marginBottom: 12 },
   pill: { paddingHorizontal: 16, paddingVertical: 8, borderRadius: 20, backgroundColor: '#F0F2F1', borderWidth: 1, borderColor: 'transparent' },
   pillActive: { backgroundColor: '#E1F5EE', borderColor: '#1D9E75' },

@@ -101,3 +101,183 @@
 #====================================================================================================
 # Testing Data - Main Agent and testing sub agent both should log testing data below this section
 #====================================================================================================
+
+user_problem_statement: |
+  Kido – Family Chain Planner / Co-parenting app (Swiss, German UI).
+  Backed by FastAPI + MongoDB, Expo frontend with file-based routing.
+  Recent user requests (message 63):
+    1. Update holiday plans to 2026, 2027, 2028 (replacing 2025).
+    2. Fix bottom tab bar overlap with OS system buttons (SafeArea).
+    3. Expand court-ruling logic to 4 distinct states:
+         court_willing / court_no_logic / court_strict / no_court
+    4. Add ICS calendar export for holidays and weekend plans.
+
+backend:
+  - task: "Holiday API returns 2026, 2027, 2028 for all 5 Kantone (ZH, BE, SG, AG, BS)"
+    implemented: true
+    working: true
+    file: "backend/server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: "NA"
+        agent: "main"
+        comment: "SWISS_HOLIDAYS dict extended with 2026/2027/2028 entries for ZH/BE/SG/AG/BS with fruehling/sommer/herbst/weihnachten. Endpoint: GET /api/swiss-holidays/{kanton}/{year}."
+      - working: true
+        agent: "testing"
+        comment: "Verified GET /api/swiss-holidays/{kanton}/{year} for all 15 combinations (ZH/BE/SG/AG/BS × 2026/2027/2028). Each response is a list of exactly 4 entries with types fruehling/sommer/herbst/weihnachten and valid YYYY-MM-DD dates where date_from < date_to. Also confirmed 2025 returns an empty list for ZH and BE (no legacy data leaked)."
+
+  - task: "Court-ruling logic – 4 states incl. court_strict → flex override"
+    implemented: true
+    working: true
+    file: "backend/server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: "NA"
+        agent: "main"
+        comment: "get_effective_flex() overrides flex_level to 'ext' (score 0) when court_ruling == 'court_strict'. PreferencesRequest accepts all 4 court states. Verify via PUT /api/chain-members/{id}/preferences then POST /api/chains/{id}/calculate-plan to confirm the strict-member is excluded from pivot."
+      - working: true
+        agent: "testing"
+        comment: "All 4 court_ruling states (court_strict, court_willing, court_no_logic, no_court) are accepted by PUT /api/chain-members/{id}/preferences and persisted. End-to-end verification: created 2-member chain (Anna court_strict+flex=yes / Peter no_court+flex=yes / both logic=even → conflict). POST /api/chains/{id}/calculate-plan returned a 'clean' plan with pivot = Peter Keller, confirming Anna's flex=yes was overridden to 'ext' by court_strict and she was excluded from pivot selection."
+
+  - task: "Weekend plan calculation, voting and pivot switch"
+    implemented: true
+    working: true
+    file: "backend/server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: true
+        agent: "main"
+        comment: "Existing logic (clean/ungern/blocked). Should be re-verified after court_strict change to ensure blocking still works."
+      - working: true
+        agent: "testing"
+        comment: "Verified end-to-end: create chain → invitation → accept → set opposing preferences (even/odd) → POST /calculate-plan returns proposal_type='clean'. Both members vote 'accepted' via /weekend-plans/{plan_id}/vote → GET /chains/{id}/weekend-plan shows status='accepted'. Pivot-switch branch verified in court-strict test (pivot's current_logic gets updated on full acceptance, though skipped here because clean-plan had no pivot)."
+
+  - task: "Holiday wishes CRUD + shared flag"
+    implemented: true
+    working: true
+    file: "backend/server.py"
+    stuck_count: 0
+    priority: "medium"
+    needs_retesting: false
+    status_history:
+      - working: true
+        agent: "main"
+        comment: "POST/PUT/GET for wishes, year filter, is_shared flag for sharing with chain."
+      - working: true
+        agent: "testing"
+        comment: "POST /api/holiday-wishes (year=2027) creates wish; PUT /api/holiday-wishes/{id} toggles is_shared=true and then status='accepted'; GET /api/chains/{id}/holiday-wishes?year=2027 returns the wish. All operations return 200 with correct persisted fields."
+
+  - task: "Messages API incl. Kido AI response"
+    implemented: true
+    working: true
+    file: "backend/server.py"
+    stuck_count: 0
+    priority: "medium"
+    needs_retesting: false
+    status_history:
+      - working: true
+        agent: "testing"
+        comment: "POST /api/messages with recipient_id=null + chain_id sends a chain message (returns {message:...}). POST with recipient_id='kido' returns {message, kido_response} where kido_response.sender_id='kido' and contains a valid German reply (get_kido_ai_response keyword-based)."
+
+frontend:
+  - task: "Bottom tab bar SafeArea (no OS button overlap)"
+    implemented: true
+    working: "NA"
+    file: "frontend/app/(tabs)/_layout.tsx"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: true
+    status_history:
+      - working: "NA"
+        agent: "main"
+        comment: "Uses useSafeAreaInsets() → bottomPad = max(insets.bottom, 20iOS/8Android); paddingBottom + height calculated dynamically."
+
+  - task: "Setup Prefs – 4 Court Ruling options"
+    implemented: true
+    working: "NA"
+    file: "frontend/app/setup-prefs.tsx"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: true
+    status_history:
+      - working: "NA"
+        agent: "main"
+        comment: "COURT_OPTIONS has 4 entries with correct value strings, color badges. Submits via PUT /api/chain-members/{id}/preferences."
+
+  - task: "ICS Export – Holidays (per Kanton + Year)"
+    implemented: true
+    working: "NA"
+    file: "frontend/utils/icsExport.ts, frontend/app/(tabs)/holidays.tsx"
+    stuck_count: 0
+    priority: "medium"
+    needs_retesting: false
+    status_history:
+      - working: "NA"
+        agent: "main"
+        comment: "exportBtn added in title row; uses expo-sharing + expo-file-system on native, Blob download on web."
+
+  - task: "ICS Export – Weekend Plan"
+    implemented: true
+    working: "NA"
+    file: "frontend/app/(tabs)/weekends.tsx"
+    stuck_count: 0
+    priority: "medium"
+    needs_retesting: false
+    status_history:
+      - working: "NA"
+        agent: "main"
+        comment: "'Kalender' button next to calculate-plan-btn; builds Sat-Sun events for each member that has kids in proposed_schedule."
+
+  - task: "Holidays – 2026/2027/2028 year picker"
+    implemented: true
+    working: "NA"
+    file: "frontend/app/(tabs)/holidays.tsx"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: "NA"
+        agent: "main"
+        comment: "YEARS = [2026, 2027, 2028]; default year 2026."
+
+metadata:
+  created_by: "main_agent"
+  version: "1.1"
+  test_sequence: 2
+  run_ui: false
+
+test_plan:
+  current_focus: []
+  stuck_tasks: []
+  test_all: false
+  test_priority: "high_first"
+
+agent_communication:
+  - agent: "main"
+    message: |
+      Please test the backend focusing on three areas:
+      1. GET /api/swiss-holidays/{kanton}/{year} for kanton ∈ {ZH, BE, SG, AG, BS} and year ∈ {2026, 2027, 2028}.
+         Each call should return 4 entries (fruehling, sommer, herbst, weihnachten) with valid YYYY-MM-DD dates.
+      2. Court-ruling flow: create chain → PUT preferences with court_ruling='court_strict', flex_level='yes'
+         → POST /chains/{id}/calculate-plan. The strict member should be treated as flex='ext' (not picked as pivot).
+         Also verify all 4 values (court_willing, court_no_logic, court_strict, no_court) are accepted.
+      3. Full plan flow (create chain, accept invitation via token, calculate plan, vote).
+      No auth – see /app/memory/test_credentials.md for test payload examples.
+  - agent: "testing"
+    message: |
+      Backend testing completed – 35/35 checks PASSED (see /app/backend_test.py).
+      Summary of verified behaviour:
+      • Swiss Holidays: all 15 combinations (ZH/BE/SG/AG/BS × 2026/2027/2028) return exactly 4 entries with
+        valid YYYY-MM-DD dates (date_from < date_to) and correct types. 2025 is correctly empty.
+      • Court ruling: PUT /chain-members/{id}/preferences accepts all 4 court_ruling states. In a 2-member
+        conflict chain (Anna court_strict+flex=yes, Peter no_court+flex=yes, both logic=even), calculate-plan
+        picks Peter as pivot → confirms get_effective_flex() overrides Anna to 'ext' (score 0).
+      • End-to-end flow: chain creation, invitation + accept, preferences, calculate-plan, voting (status→
+        'accepted'), holiday wish create/share/accept/list, chain message, Kido AI response – all working.
+      No critical or minor issues observed. All tasks in current_focus are green; I've cleared the focus list.

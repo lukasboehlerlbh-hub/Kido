@@ -7,6 +7,7 @@ import { router } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useUser } from '../../context/UserContext';
 import { api } from '../../services/api';
+import { buildICS, addDays, exportICS } from '../../utils/icsExport';
 
 const CELL_W = 46;
 const CELL_H = 44;
@@ -115,6 +116,37 @@ export default function WeekendsScreen() {
     }
   };
 
+  const handleExportPlan = async () => {
+    if (!plan?.weekends || !plan?.proposed_schedule || !members.length) {
+      Alert.alert('Kein Plan', 'Bitte zuerst einen Plan berechnen.');
+      return;
+    }
+    const events: any[] = [];
+    for (const m of members) {
+      const mid = m.id;
+      const row = plan.proposed_schedule[mid] || [];
+      row.forEach((hasKids: boolean, wi: number) => {
+        if (!hasKids) return;
+        const w = plan.weekends[wi];
+        if (!w) return;
+        // Saturday + Sunday = 2 days, DTEND exclusive → +2 from Sat = Mon
+        events.push({
+          uid: `kido-we-${mid}-${w.date}@kido.app`,
+          start: w.date,
+          end: addDays(w.date, 2),
+          summary: `Kido: ${m.user_name} mit Kindern (${w.label})`,
+          description: `Wochenende ${w.label} – KW ${w.week_num}`,
+        });
+      });
+    }
+    if (!events.length) {
+      Alert.alert('Leer', 'Keine Wochenenden im Plan gefunden.');
+      return;
+    }
+    const ics = buildICS(events, 'Kido Wochenendplan');
+    await exportICS(ics, `kido-wochenendplan-${Date.now()}.ics`);
+  };
+
   const handleVote = async (vote: 'accepted' | 'declined') => {
     if (!plan?.id || !user?.chainMemberId) return;
     setVoting(true);
@@ -152,19 +184,27 @@ export default function WeekendsScreen() {
         <Text style={s.pageTitle}>Wochenendplan</Text>
         <Text style={s.pageSub}>Nächste 8 Wochenenden auf einen Blick</Text>
 
-        {/* Calculate Button */}
-        <TouchableOpacity
-          testID="calculate-plan-btn"
-          style={[s.calcBtn, calculating && { opacity: 0.7 }]}
-          onPress={handleCalculate}
-          disabled={calculating}
-        >
-          {calculating
-            ? <ActivityIndicator color="#1D9E75" size="small" />
-            : <Ionicons name="calculator-outline" size={18} color="#1D9E75" />
-          }
-          <Text style={s.calcBtnText}>{plan ? 'Plan neu berechnen' : 'Plan berechnen'}</Text>
-        </TouchableOpacity>
+        {/* Action Row */}
+        <View style={s.actionRow}>
+          <TouchableOpacity
+            testID="calculate-plan-btn"
+            style={[s.calcBtn, calculating && { opacity: 0.7 }]}
+            onPress={handleCalculate}
+            disabled={calculating}
+          >
+            {calculating
+              ? <ActivityIndicator color="#1D9E75" size="small" />
+              : <Ionicons name="calculator-outline" size={18} color="#1D9E75" />
+            }
+            <Text style={s.calcBtnText}>{plan ? 'Plan neu berechnen' : 'Plan berechnen'}</Text>
+          </TouchableOpacity>
+          {plan && (
+            <TouchableOpacity testID="export-plan-btn" style={s.exportPlanBtn} onPress={handleExportPlan}>
+              <Ionicons name="calendar-outline" size={18} color="#1D9E75" />
+              <Text style={s.calcBtnText}>Kalender</Text>
+            </TouchableOpacity>
+          )}
+        </View>
 
         {/* Plan Status */}
         {plan && (
@@ -266,7 +306,9 @@ const s = StyleSheet.create({
   center: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   pageTitle: { fontSize: 22, fontWeight: '700', color: '#1A1C1B', marginBottom: 4 },
   pageSub: { fontSize: 13, color: '#6E7170', marginBottom: 16 },
-  calcBtn: { flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: '#E1F5EE', borderRadius: 10, paddingVertical: 12, paddingHorizontal: 16, marginBottom: 16, alignSelf: 'flex-start' },
+  calcBtn: { flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: '#E1F5EE', borderRadius: 10, paddingVertical: 12, paddingHorizontal: 16 },
+  exportPlanBtn: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: '#F0FBF7', borderWidth: 1, borderColor: '#1D9E75', borderRadius: 10, paddingVertical: 12, paddingHorizontal: 14 },
+  actionRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 16 },
   calcBtnText: { color: '#1D9E75', fontWeight: '600', fontSize: 14 },
   statusCard: { borderLeftWidth: 4, borderRadius: 12, padding: 14, marginBottom: 16 },
   statusCardHeader: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 8 },
