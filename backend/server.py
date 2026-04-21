@@ -1256,6 +1256,7 @@ class PartnerRelationRequest(BaseModel):
     partner2_id: str
 
 @app.post("/api/partner-relations")
+@app.post("/api/couple-relations")
 async def create_partner_relation(req: PartnerRelationRequest):
     # Prevent duplicates
     existing = await db.partner_relations.find_one({
@@ -1283,11 +1284,13 @@ async def create_partner_relation(req: PartnerRelationRequest):
     return serialize_doc(doc)
 
 @app.get("/api/chains/{chain_id}/partner-relations")
+@app.get("/api/chains/{chain_id}/couple-relations")
 async def get_partner_relations(chain_id: str):
     rels = await db.partner_relations.find({"chain_id": chain_id}).to_list(50)
     return [serialize_doc(r) for r in rels]
 
 @app.delete("/api/partner-relations/{relation_id}")
+@app.delete("/api/couple-relations/{relation_id}")
 async def delete_partner_relation(relation_id: str):
     if not ObjectId.is_valid(relation_id):
         raise HTTPException(status_code=400, detail="Invalid relation ID")
@@ -1303,6 +1306,29 @@ async def get_all_relations(chain_id: str):
     return {
         "coparent_relations": [serialize_doc(r) for r in coparent],
         "partner_relations": [serialize_doc(r) for r in partner],
+    }
+
+@app.get("/api/chains/{chain_id}/consistency-check")
+async def consistency_check(chain_id: str):
+    """Check consistency of chain relationships - used by frontend."""
+    coparent = await db.coparent_relations.find({"chain_id": chain_id}).to_list(50)
+    partner = await db.partner_relations.find({"chain_id": chain_id}).to_list(50)
+    members = await db.chain_members.find({"chain_id": chain_id}).to_list(20)
+    member_ids = {str(m["_id"]) for m in members}
+    issues = []
+    for r in coparent:
+        if r.get("parent1_id") not in member_ids or r.get("parent2_id") not in member_ids:
+            issues.append({"type": "coparent", "issue": "member_not_found"})
+    for r in partner:
+        if r.get("partner1_id") not in member_ids or r.get("partner2_id") not in member_ids:
+            issues.append({"type": "partner", "issue": "member_not_found"})
+    return {
+        "chain_id": chain_id,
+        "coparent_count": len(coparent),
+        "partner_count": len(partner),
+        "member_count": len(members),
+        "issues": issues,
+        "status": "ok" if not issues else "warning"
     }
 
 # ── Chat Channels ─────────────────────────────────────────────────────────────
