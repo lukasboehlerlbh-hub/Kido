@@ -7,20 +7,20 @@ from typing import Optional, List, Dict, Any
 from datetime import datetime, timezone, date, timedelta
 import os, secrets, string, random
 from dotenv import load_dotenv
- 
+
 load_dotenv()
- 
+
 app = FastAPI()
- 
+
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
- 
+
 MONGO_URL = os.environ["MONGO_URL"]
 DB_NAME = os.getenv("DB_NAME", "kido_app")
 client = AsyncIOMotorClient(MONGO_URL)
 db = client[DB_NAME]
- 
+
 AVATAR_COLORS = ["#1D9E75", "#8B5CF6", "#FB7185", "#F59E0B", "#60A5FA", "#F472B6", "#34D399", "#FCD34D"]
- 
+
 def serialize_doc(doc: Any) -> Any:
     if doc is None:
         return None
@@ -47,11 +47,11 @@ def serialize_doc(doc: Any) -> Any:
     if "_id" in result:
         result["id"] = result.pop("_id")
     return result
- 
+
 # ── Plan Calculation (KORRIGIERT: paarbasierte Konfliktlogik) ─────────────────
- 
+
 FLEX_SCORES = {"yes": 5, "rel": 3, "disc": 2, "temp": 2, "no": 1, "ext": 0}
- 
+
 def get_next_weekends(n=8):
     today = date.today()
     days_to_sat = (5 - today.weekday()) % 7 or 7
@@ -66,7 +66,7 @@ def get_next_weekends(n=8):
         }
         for i in range(n)
     ]
- 
+
 def calc_schedule(members, overrides={}):
     weekends = get_next_weekends(8)
     schedule = {}
@@ -75,13 +75,13 @@ def calc_schedule(members, overrides={}):
         logic = overrides.get(mid, m.get("current_logic", "even"))
         schedule[mid] = [w["is_even"] if logic == "even" else not w["is_even"] for w in weekends]
     return schedule
- 
+
 def get_effective_flex(member: dict) -> str:
     """court_strict überschreibt flex zu ext (0) – kein Wechsel möglich."""
     if member.get("court_ruling") == "court_strict":
         return "ext"
     return member.get("flex_level", "no")
- 
+
 def build_coparent_pairs(members, coparent_relations):
     """
     Baut Ex-Paar-Liste aus coparent_relations auf.
@@ -100,7 +100,7 @@ def build_coparent_pairs(members, coparent_relations):
         for i in range(0, len(member_ids) - 1, 2):
             pairs.append((member_ids[i], member_ids[i + 1]))
     return pairs
- 
+
 def find_conflicts_by_pairs(schedule, coparent_pairs):
     """
     KORRIGIERT: Prüft Konflikte zwischen echten Ex-Paaren.
@@ -114,7 +114,7 @@ def find_conflicts_by_pairs(schedule, coparent_pairs):
             if sched1[w] and sched2[w]:
                 conflicts.append({"pair": (id1, id2), "week": w})
     return conflicts
- 
+
 def compute_blockers_by_pairs(members, pairs, schedule):
     """
     Blocker = Personen in einem Konflikt-Paar mit Flex-Score <= 1.
@@ -131,7 +131,7 @@ def compute_blockers_by_pairs(members, pairs, schedule):
             if FLEX_SCORES.get(get_effective_flex(m), 0) <= 1:
                 blockers.append(mid)
     return blockers
- 
+
 def calculate_plan(members, coparent_relations=None, rejected_pivot_ids=None):
     """
     KORRIGIERTER Hauptalgorithmus.
@@ -140,12 +140,12 @@ def calculate_plan(members, coparent_relations=None, rejected_pivot_ids=None):
     """
     rejected_pivot_ids = rejected_pivot_ids or []
     coparent_relations = coparent_relations or []
- 
+
     weekends = get_next_weekends(8)
     pairs = build_coparent_pairs(members, coparent_relations)
     current_schedule = calc_schedule(members)
     conflicts = find_conflicts_by_pairs(current_schedule, pairs)
- 
+
     if not conflicts:
         return {
             "type": "clean", "stage": "1_clean",
@@ -154,23 +154,23 @@ def calculate_plan(members, coparent_relations=None, rejected_pivot_ids=None):
             "weekends": weekends, "blockers": [], "subgroups": None,
             "kido_message": KIDO_MSG["clean"]
         }
- 
+
     # IDs aller Personen in Konflikt-Paaren
     conflicted_pair_ids = set()
     for c in conflicts:
         conflicted_pair_ids.add(c["pair"][0])
         conflicted_pair_ids.add(c["pair"][1])
- 
+
     # Kandidaten nach Flex-Score sortieren (höchster zuerst)
     sorted_members = sorted(
         members,
         key=lambda m: FLEX_SCORES.get(get_effective_flex(m), 0),
         reverse=True
     )
- 
+
     for candidate in sorted_members:
         cid = str(candidate.get("id") or str(candidate.get("_id", "")))
- 
+
         # Zu wenig flexibel → überspringen
         if FLEX_SCORES.get(get_effective_flex(candidate), 0) <= 1:
             continue
@@ -180,12 +180,12 @@ def calculate_plan(members, coparent_relations=None, rejected_pivot_ids=None):
         # Nicht in einem Konflikt-Paar → muss nicht wechseln
         if cid not in conflicted_pair_ids:
             continue
- 
+
         # Logikwechsel testen
         new_logic = "odd" if candidate.get("current_logic", "even") == "even" else "even"
         trial_schedule = calc_schedule(members, {cid: new_logic})
         trial_conflicts = find_conflicts_by_pairs(trial_schedule, pairs)
- 
+
         if not trial_conflicts:
             is_ungern = candidate.get("flex_level") in ["rel", "temp"]
             stage = "2_ungern" if is_ungern else "1_clean"
@@ -201,7 +201,7 @@ def calculate_plan(members, coparent_relations=None, rejected_pivot_ids=None):
                 "blockers": [], "subgroups": None,
                 "kido_message": KIDO_MSG["ungern"] if is_ungern else KIDO_MSG["clean"]
             }
- 
+
     # Keine Lösung → Stufe 3a
     blockers = compute_blockers_by_pairs(members, pairs, current_schedule)
     return {
@@ -211,7 +211,7 @@ def calculate_plan(members, coparent_relations=None, rejected_pivot_ids=None):
         "weekends": weekends, "blockers": blockers, "subgroups": None,
         "kido_message": KIDO_MSG["blocked_3a"]
     }
- 
+
 def compute_subgroups(members, coparent_relations=None):
     """
     Stufe 3b: Subgruppen basierend auf Ex-Paaren.
@@ -223,7 +223,7 @@ def compute_subgroups(members, coparent_relations=None):
     member_map = {str(m.get("id") or str(m.get("_id", ""))): m for m in members}
     groups = []
     processed = set()
- 
+
     for (id1, id2) in pairs:
         m1 = member_map.get(id1)
         m2 = member_map.get(id2)
@@ -245,14 +245,14 @@ def compute_subgroups(members, coparent_relations=None):
                     processed.add(mid)
             if group:
                 groups.append(group)
- 
+
     # Restliche Members ohne definiertes Paar
     for m in members:
         mid = str(m.get("id") or str(m.get("_id", "")))
         if mid not in processed:
             groups.append([{"id": mid, "name": m.get("user_name", ""), "color": m.get("avatar_color", "#1D9E75"), "logic": m.get("current_logic", "even")}])
     return groups
- 
+
 KIDO_MSG = {
     "clean": "Liebe Elternkette – ich habe eine Lösung gefunden, die für alle passen sollte. Bitte schaut euch den Vorschlag an.",
     "ungern": "Kido hat eine mögliche Lösung gefunden – aber sie hängt an einer Person. Wenn diese Person bereit ist, löst das den Konflikt für die gesamte Kette.",
@@ -264,7 +264,7 @@ KIDO_MSG = {
     "blocked_3b": "Es gibt unauflösbare Blockaden. Kido schlägt Subgruppen mit unterschiedlichen Logiken vor. Einige Paare sind dabei suboptimal gestellt.",
     "accepted": "Herzlichen Dank an alle. Ihr habt gemeinsam eine Lösung gefunden – das zeigt, dass ihr das Beste für eure Kinder wollt.",
 }
- 
+
 def get_kido_ai_response(text: str) -> str:
     t = text.lower()
     if any(w in t for w in ["wochenende","plan","kalender"]):
@@ -280,9 +280,9 @@ def get_kido_ai_response(text: str) -> str:
         "Ich bin hier, um zu helfen – nicht zu urteilen. Was beschäftigt dich am meisten?",
         "Ein ausgeglichenes Wochenende ist kein Luxus – es ist das Fundament.",
     ])
- 
+
 # ── Swiss Holidays ─────────────────────────────────────────────────────────────
- 
+
 SWISS_HOLIDAYS = {
     "ZH": {
         2026: [{"type":"fruehling","label":"Frühlingsferien","date_from":"2026-04-06","date_to":"2026-04-17"},
@@ -355,20 +355,20 @@ SWISS_HOLIDAYS = {
                {"type":"weihnachten","label":"Weihnachtsferien","date_from":"2028-12-22","date_to":"2029-01-05"}],
     },
 }
- 
+
 # ── Request Models ─────────────────────────────────────────────────────────────
- 
+
 class CreateChainRequest(BaseModel):
     user_name: str
     user_phone: str
     avatar_color: str
     chain_name: Optional[str] = None
- 
+
 class AcceptInvitationRequest(BaseModel):
     user_name: str
     user_phone: str
     avatar_color: str
- 
+
 class PreferencesRequest(BaseModel):
     court_ruling: str
     current_logic: str
@@ -376,12 +376,12 @@ class PreferencesRequest(BaseModel):
     flex_duration: Optional[int] = None
     external_type: Optional[str] = None
     external_level: Optional[int] = None
- 
+
 class CreateInvitationRequest(BaseModel):
     chain_id: str
     invited_by_id: str
     phone_number: str
- 
+
 class HolidayWishRequest(BaseModel):
     member_id: str
     chain_id: str
@@ -396,7 +396,7 @@ class HolidayWishRequest(BaseModel):
     children_names: Optional[List[str]] = None
     is_shared: bool = False
     note: Optional[str] = None
- 
+
 class UpdateHolidayWishRequest(BaseModel):
     wish: Optional[str] = None
     wish_target_member_id: Optional[str] = None
@@ -406,7 +406,7 @@ class UpdateHolidayWishRequest(BaseModel):
     title: Optional[str] = None
     children_names: Optional[List[str]] = None
     partner_status: Optional[str] = None
- 
+
 class SendMessageRequest(BaseModel):
     sender_id: str
     chain_id: Optional[str] = None
@@ -415,17 +415,17 @@ class SendMessageRequest(BaseModel):
     is_kido_message: bool = False
     was_moderated: bool = False
     original_text: Optional[str] = None
- 
+
 class VoteRequest(BaseModel):
     member_id: str
     vote: str
- 
+
 # ── Endpoints ─────────────────────────────────────────────────────────────────
- 
+
 @app.get("/api/health")
 async def health():
     return {"status": "ok"}
- 
+
 # Users
 @app.post("/api/users")
 async def create_user(data: dict):
@@ -436,14 +436,14 @@ async def create_user(data: dict):
     result = await db.users.insert_one(user)
     user["_id"] = result.inserted_id
     return serialize_doc(user)
- 
+
 @app.get("/api/users/phone/{phone}")
 async def get_user_by_phone(phone: str):
     user = await db.users.find_one({"phone": phone})
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
     return serialize_doc(user)
- 
+
 @app.get("/api/users/{user_id}")
 async def get_user(user_id: str):
     if not ObjectId.is_valid(user_id):
@@ -452,7 +452,7 @@ async def get_user(user_id: str):
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
     return serialize_doc(user)
- 
+
 @app.put("/api/users/{user_id}")
 async def update_user(user_id: str, data: dict):
     if not ObjectId.is_valid(user_id):
@@ -461,7 +461,7 @@ async def update_user(user_id: str, data: dict):
     await db.users.update_one({"_id": ObjectId(user_id)}, {"$set": allowed})
     user = await db.users.find_one({"_id": ObjectId(user_id)})
     return serialize_doc(user)
- 
+
 # Chains
 @app.post("/api/chains")
 async def create_chain(req: CreateChainRequest):
@@ -481,7 +481,7 @@ async def create_chain(req: CreateChainRequest):
     member_id = str(member_result.inserted_id)
     return {"user_id": user_id, "chain_id": chain_id, "member_id": member_id,
             "chain_name": chain["name"], "user_name": req.user_name, "avatar_color": req.avatar_color}
- 
+
 @app.get("/api/chains/{chain_id}")
 async def get_chain(chain_id: str):
     if not ObjectId.is_valid(chain_id):
@@ -493,7 +493,7 @@ async def get_chain(chain_id: str):
     result = serialize_doc(chain)
     result["members"] = [serialize_doc(m) for m in members]
     return result
- 
+
 # Invitations
 @app.post("/api/invitations")
 async def create_invitation(req: CreateInvitationRequest):
@@ -504,7 +504,7 @@ async def create_invitation(req: CreateInvitationRequest):
     result = await db.invitations.insert_one(inv)
     inv["_id"] = result.inserted_id
     return serialize_doc(inv)
- 
+
 @app.get("/api/invitations/{token}")
 async def get_invitation(token: str):
     inv = await db.invitations.find_one({"token": token})
@@ -515,7 +515,7 @@ async def get_invitation(token: str):
     if chain:
         result["chain_name"] = chain.get("name", "")
     return result
- 
+
 @app.post("/api/invitations/{token}/accept")
 async def accept_invitation(token: str, req: AcceptInvitationRequest):
     inv = await db.invitations.find_one({"token": token, "status": "sent"})
@@ -541,7 +541,7 @@ async def accept_invitation(token: str, req: AcceptInvitationRequest):
     return {"user_id": user_id, "chain_id": chain_id, "member_id": member_id,
             "chain_name": chain.get("name","") if chain else "", "user_name": req.user_name,
             "avatar_color": avatar_color}
- 
+
 # Chain Members
 @app.put("/api/chain-members/{member_id}/preferences")
 async def update_preferences(member_id: str, req: PreferencesRequest):
@@ -557,7 +557,7 @@ async def update_preferences(member_id: str, req: PreferencesRequest):
     await db.chain_members.update_one({"_id": ObjectId(member_id)}, {"$set": upd})
     m = await db.chain_members.find_one({"_id": ObjectId(member_id)})
     return serialize_doc(m)
- 
+
 @app.get("/api/chain-members/{member_id}")
 async def get_member(member_id: str):
     if not ObjectId.is_valid(member_id):
@@ -566,7 +566,7 @@ async def get_member(member_id: str):
     if not m:
         raise HTTPException(status_code=404, detail="Member not found")
     return serialize_doc(m)
- 
+
 # Weekend Plans
 @app.get("/api/chains/{chain_id}/weekend-plan")
 async def get_weekend_plan(chain_id: str):
@@ -577,21 +577,21 @@ async def get_weekend_plan(chain_id: str):
     votes = await db.plan_votes.find({"plan_id": str(plan["_id"])}).to_list(20)
     plan_data["votes"] = [serialize_doc(v) for v in votes]
     return plan_data
- 
+
 @app.post("/api/chains/{chain_id}/calculate-plan")
 async def calculate_weekend_plan(chain_id: str):
     members = await db.chain_members.find({"chain_id": chain_id}).sort("position", 1).to_list(20)
     if not members:
         raise HTTPException(status_code=404, detail="No members found")
     members_data = [serialize_doc(m) for m in members]
- 
+
     # KORRIGIERT: coparent_relations aus DB laden
     coparent_rels = await db.coparent_relations.find({"chain_id": chain_id}).to_list(50)
     coparent_rels_data = [serialize_doc(r) for r in coparent_rels]
- 
+
     result = calculate_plan(members_data, coparent_relations=coparent_rels_data)
     subgroups = compute_subgroups(members_data, coparent_relations=coparent_rels_data) if result.get("stage") == "3a_blockers" else None
- 
+
     plan = {"chain_id": chain_id, "status": "proposed",
             "proposal_type": result["type"],
             "escalation_stage": result.get("stage", "1_clean"),
@@ -607,14 +607,14 @@ async def calculate_weekend_plan(chain_id: str):
             "weekends": result["weekends"],
             "kido_message": result["kido_message"],
             "created_date": datetime.now(timezone.utc)}
- 
+
     plan_result = await db.weekend_plans.insert_one(plan)
     plan_id = str(plan_result.inserted_id)
- 
+
     stage = result.get("stage", "1_clean")
     current_sched = result["schedule"]
     proposed_sched = result["proposed_schedule"]
- 
+
     for m in members_data:
         mid = m["id"]
         changes = current_sched.get(mid) != proposed_sched.get(mid)
@@ -630,14 +630,14 @@ async def calculate_weekend_plan(chain_id: str):
                 "logic_changes": changes,
                 "created_date": datetime.now(timezone.utc)}
         await db.plan_votes.insert_one(vote)
- 
+
     plan["_id"] = plan_result.inserted_id
     plan_data = serialize_doc(plan)
     votes = await db.plan_votes.find({"plan_id": plan_id}).to_list(20)
     plan_data["votes"] = [serialize_doc(v) for v in votes]
     plan_data["subgroups_preview"] = subgroups
     return plan_data
- 
+
 @app.post("/api/weekend-plans/{plan_id}/reconsider")
 async def reconsider_plan(plan_id: str):
     if not ObjectId.is_valid(plan_id):
@@ -661,7 +661,7 @@ async def reconsider_plan(plan_id: str):
     votes = await db.plan_votes.find({"plan_id": plan_id}).to_list(20)
     result["votes"] = [serialize_doc(v) for v in votes]
     return result
- 
+
 @app.post("/api/weekend-plans/{plan_id}/try-next-pivot")
 async def try_next_pivot(plan_id: str):
     if not ObjectId.is_valid(plan_id):
@@ -673,18 +673,18 @@ async def try_next_pivot(plan_id: str):
     rejected = list(plan.get("rejected_pivot_ids") or [])
     if plan.get("pivot_member_id") and plan["pivot_member_id"] not in rejected:
         rejected.append(plan["pivot_member_id"])
- 
+
     members = await db.chain_members.find({"chain_id": chain_id}).sort("position", 1).to_list(20)
     members_data = [serialize_doc(m) for m in members]
- 
+
     # KORRIGIERT: coparent_relations aus DB laden
     coparent_rels = await db.coparent_relations.find({"chain_id": chain_id}).to_list(50)
     coparent_rels_data = [serialize_doc(r) for r in coparent_rels]
- 
+
     result = calculate_plan(members_data, coparent_relations=coparent_rels_data, rejected_pivot_ids=rejected)
     now = datetime.now(timezone.utc)
     subgroups = compute_subgroups(members_data, coparent_relations=coparent_rels_data) if result.get("stage") == "3a_blockers" else None
- 
+
     new_plan = {"chain_id": chain_id, "status": "proposed",
                 "proposal_type": result["type"],
                 "escalation_stage": result.get("stage", "1_clean"),
@@ -700,13 +700,13 @@ async def try_next_pivot(plan_id: str):
                 "weekends": result["weekends"],
                 "kido_message": result["kido_message"],
                 "created_date": now}
- 
+
     res = await db.weekend_plans.insert_one(new_plan)
     new_id = str(res.inserted_id)
     stage = result.get("stage", "1_clean")
     cur_s = result["schedule"]
     prop_s = result["proposed_schedule"]
- 
+
     for m in members_data:
         mid = m["id"]
         changes = cur_s.get(mid) != prop_s.get(mid)
@@ -728,7 +728,7 @@ async def try_next_pivot(plan_id: str):
     data["votes"] = [serialize_doc(v) for v in votes]
     data["subgroups_preview"] = subgroups
     return data
- 
+
 @app.post("/api/weekend-plans/{plan_id}/escalate-3b")
 async def escalate_to_3b(plan_id: str):
     if not ObjectId.is_valid(plan_id):
@@ -739,11 +739,11 @@ async def escalate_to_3b(plan_id: str):
     chain_id = plan["chain_id"]
     members = await db.chain_members.find({"chain_id": chain_id}).sort("position", 1).to_list(20)
     members_data = [serialize_doc(m) for m in members]
- 
+
     # KORRIGIERT: coparent_relations aus DB laden
     coparent_rels = await db.coparent_relations.find({"chain_id": chain_id}).to_list(50)
     coparent_rels_data = [serialize_doc(r) for r in coparent_rels]
- 
+
     subgroups = compute_subgroups(members_data, coparent_relations=coparent_rels_data)
     await db.weekend_plans.update_one({"_id": ObjectId(plan_id)},
         {"$set": {"escalation_stage": "3b_subgroups", "subgroups": subgroups, "kido_message": KIDO_MSG["blocked_3b"]}})
@@ -753,7 +753,7 @@ async def escalate_to_3b(plan_id: str):
     votes = await db.plan_votes.find({"plan_id": plan_id}).to_list(20)
     data["votes"] = [serialize_doc(v) for v in votes]
     return data
- 
+
 @app.post("/api/weekend-plans/{plan_id}/vote")
 async def vote_plan(plan_id: str, req: VoteRequest):
     if not ObjectId.is_valid(plan_id):
@@ -784,7 +784,7 @@ async def vote_plan(plan_id: str, req: VoteRequest):
     result = serialize_doc(plan)
     result["votes"] = [serialize_doc(v) for v in votes]
     return result
- 
+
 # Holiday Wishes
 @app.get("/api/chains/{chain_id}/holiday-wishes")
 async def get_holiday_wishes(chain_id: str, year: Optional[int] = None, viewer_member_id: Optional[str] = None):
@@ -800,7 +800,7 @@ async def get_holiday_wishes(chain_id: str, year: Optional[int] = None, viewer_m
         if viewer_member_id == w.get("member_id") or viewer_member_id == w.get("wish_target_member_id"):
             out.append(w)
     return [serialize_doc(w) for w in out]
- 
+
 @app.post("/api/holiday-wishes")
 async def create_holiday_wish(req: HolidayWishRequest):
     wish = {"member_id": req.member_id, "chain_id": req.chain_id, "year": req.year,
@@ -814,7 +814,7 @@ async def create_holiday_wish(req: HolidayWishRequest):
     result = await db.holiday_wishes.insert_one(wish)
     wish["_id"] = result.inserted_id
     return serialize_doc(wish)
- 
+
 @app.put("/api/holiday-wishes/{wish_id}")
 async def update_holiday_wish(wish_id: str, req: UpdateHolidayWishRequest):
     if not ObjectId.is_valid(wish_id):
@@ -824,13 +824,13 @@ async def update_holiday_wish(wish_id: str, req: UpdateHolidayWishRequest):
         await db.holiday_wishes.update_one({"_id": ObjectId(wish_id)}, {"$set": upd})
     w = await db.holiday_wishes.find_one({"_id": ObjectId(wish_id)})
     return serialize_doc(w)
- 
+
 # Messages
 @app.get("/api/chains/{chain_id}/messages")
 async def get_chain_messages(chain_id: str):
     msgs = await db.messages.find({"chain_id": chain_id, "recipient_id": None}).sort("created_date", 1).to_list(100)
     return [serialize_doc(m) for m in msgs]
- 
+
 @app.get("/api/messages/direct/{user1_id}/{user2_id}")
 async def get_direct_messages(user1_id: str, user2_id: str):
     msgs = await db.messages.find(
@@ -838,7 +838,7 @@ async def get_direct_messages(user1_id: str, user2_id: str):
                  {"sender_id": user2_id, "recipient_id": user1_id}]}
     ).sort("created_date", 1).to_list(100)
     return [serialize_doc(m) for m in msgs]
- 
+
 @app.get("/api/messages/kido/{user_id}")
 async def get_kido_messages(user_id: str):
     msgs = await db.messages.find(
@@ -846,7 +846,7 @@ async def get_kido_messages(user_id: str):
                  {"sender_id": "kido", "recipient_id": user_id}]}
     ).sort("created_date", 1).to_list(100)
     return [serialize_doc(m) for m in msgs]
- 
+
 @app.post("/api/messages")
 async def send_message(req: SendMessageRequest):
     now = datetime.now(timezone.utc)
@@ -866,69 +866,175 @@ async def send_message(req: SendMessageRequest):
         kido_msg["_id"] = kido_result.inserted_id
         return {"message": saved, "kido_response": serialize_doc(kido_msg)}
     return {"message": saved}
- 
+
 # Swiss Holidays
 @app.get("/api/swiss-holidays/{kanton}/{year}")
 async def get_swiss_holidays(kanton: str, year: int):
     kanton = kanton.upper()
     holidays = SWISS_HOLIDAYS.get(kanton, {}).get(year, [])
     return [{"kanton": kanton, "year": year, **h} for h in holidays]
- 
+
 # ── Dev / Test Chain Seed ─────────────────────────────────────────────────────
- 
+
 TEST_SCENARIOS: Dict[str, Dict[str, Any]] = {
-    "no_conflict": {
-        "label": "Szenario 1 – Keine Konflikte",
-        "description": "Alle Ex-Paare haben korrekte Alternierung. Kein Pivot nötig.",
-        "phone_prefix": "+41 79 100 00 ",
+
+    # ── Szenario 1: Harmonische Patchwork-Kette ────────────────────────────
+    # Kettenstruktur:
+    #   Anna ←Ex→ Thomas ←Partner→ Nina ←Ex→ Marco ←Partner→ Sara ←Ex→ David
+    # Alle Ex-Paare alternieren korrekt → kein Konflikt
+    "harmonische_kette": {
+        "label": "Szenario 1 – Harmonische Patchwork-Kette",
+        "description": (
+            "Anna & Thomas (Ex, Kinder: Lena, Tim). Thomas & Nina (Paar). "
+            "Nina & Marco (Ex, Kinder: Sami). Marco & Sara (Paar). "
+            "Sara & David (Ex, Kinder: Ben, Lea). "
+            "Alle Ex-Paare alternieren korrekt → kein Konflikt."
+        ),
+        "phone_prefix": "+41 79 100 10 ",
         "members": [
-            {"name": "Elena Weber",  "color": "#1D9E75", "logic": "even", "flex": "disc", "court": "no_court"},
-            {"name": "Daniel Weber", "color": "#E24B4A", "logic": "odd",  "flex": "disc", "court": "no_court"},
-            {"name": "Sophie Keller","color": "#8B5CF6", "logic": "even", "flex": "disc", "court": "no_court"},
-            {"name": "Jonas Keller", "color": "#F59E0B", "logic": "odd",  "flex": "disc", "court": "no_court"},
-            {"name": "Lea Baumann",  "color": "#60A5FA", "logic": "even", "flex": "disc", "court": "no_court"},
-            {"name": "Mats Baumann", "color": "#F472B6", "logic": "odd",  "flex": "disc", "court": "no_court"},
+            # Pos 1: Anna – Ex von Thomas
+            {"name": "Anna Meier",   "color": "#1D9E75", "logic": "even", "flex": "disc", "court": "no_court"},
+            # Pos 2: Thomas – Ex von Anna, Partner von Nina
+            {"name": "Thomas Meier", "color": "#8B5CF6", "logic": "odd",  "flex": "disc", "court": "no_court"},
+            # Pos 3: Nina – Partnerin von Thomas, Ex von Marco
+            {"name": "Nina Huber",   "color": "#FB7185", "logic": "odd",  "flex": "disc", "court": "no_court"},
+            # Pos 4: Marco – Ex von Nina, Partner von Sara
+            {"name": "Marco Huber",  "color": "#F59E0B", "logic": "even", "flex": "disc", "court": "no_court"},
+            # Pos 5: Sara – Partnerin von Marco, Ex von David
+            {"name": "Sara Keller",  "color": "#60A5FA", "logic": "even", "flex": "disc", "court": "no_court"},
+            # Pos 6: David – Ex von Sara
+            {"name": "David Keller", "color": "#F472B6", "logic": "odd",  "flex": "disc", "court": "no_court"},
         ],
-        "couples": [(0, 1, ["Emma", "Leo"]), (2, 3, ["Noah"]), (4, 5, ["Lina", "Ben"])],
+        "couples": [
+            (0, 1, ["Lena", "Tim"]),   # Anna ↔ Thomas (Ex)
+            (2, 3, ["Sami"]),           # Nina ↔ Marco (Ex)
+            (4, 5, ["Ben", "Lea"]),     # Sara ↔ David (Ex)
+        ],
+        "current_partners": [(1, 2), (3, 4)],  # Thomas↔Nina, Marco↔Sara
     },
-    "one_conflict": {
-        "label": "Szenario 2 – Ein lösbarer Konflikt",
-        "description": "Ex-Paar Kunz hat gleiche Logik. Lösbar durch Ben (flex=yes).",
-        "phone_prefix": "+41 79 200 00 ",
+
+    # ── Szenario 2: Brücken-Konflikt (lösbar, Stufe 1) ────────────────────
+    # Kettenstruktur:
+    #   Laura ←Ex→ Stefan ←Partner→ Monika ←Ex→ Peter ←Partner→ Claudia ←Ex→ René
+    # Konflikt: Claudia & René (beide even → gleiche WE mit Kindern)
+    # René (flex=yes) wechselt auf odd → gelöst, Stufe 1 clean
+    "bruecken_konflikt": {
+        "label": "Szenario 2 – Brücken-Konflikt (lösbar, Stufe 1)",
+        "description": (
+            "Laura & Stefan (Ex, Kinder: Mia). Stefan & Monika (Paar). "
+            "Monika & Peter (Ex, Kinder: Jonas, Lea). Peter & Claudia (Paar). "
+            "Claudia & René (Ex, Kinder: Zoe). "
+            "Konflikt: Claudia & René beide even. "
+            "René (flex=yes) wechselt auf odd → Stufe 1 clean."
+        ),
+        "phone_prefix": "+41 79 200 10 ",
         "members": [
-            {"name": "Nora Fischer", "color": "#1D9E75", "logic": "odd",  "flex": "disc", "court": "no_court"},
-            {"name": "Finn Fischer", "color": "#E24B4A", "logic": "even", "flex": "disc", "court": "no_court"},
-            {"name": "Mia Roth",     "color": "#8B5CF6", "logic": "odd",  "flex": "disc", "court": "no_court"},
-            {"name": "Lukas Roth",   "color": "#F59E0B", "logic": "even", "flex": "disc", "court": "no_court"},
-            {"name": "Emma Kunz",    "color": "#60A5FA", "logic": "odd",  "flex": "disc", "court": "no_court"},
-            {"name": "Ben Kunz",     "color": "#F472B6", "logic": "odd",  "flex": "yes",  "court": "no_court"},
+            # Pos 1: Laura – Ex von Stefan
+            {"name": "Laura Frei",    "color": "#1D9E75", "logic": "odd",  "flex": "disc", "court": "no_court"},
+            # Pos 2: Stefan – Ex von Laura, Partner von Monika
+            {"name": "Stefan Frei",   "color": "#8B5CF6", "logic": "even", "flex": "disc", "court": "no_court"},
+            # Pos 3: Monika – Partnerin von Stefan, Ex von Peter
+            {"name": "Monika Suter",  "color": "#FB7185", "logic": "odd",  "flex": "disc", "court": "no_court"},
+            # Pos 4: Peter – Ex von Monika, Partner von Claudia
+            {"name": "Peter Suter",   "color": "#F59E0B", "logic": "even", "flex": "disc", "court": "no_court"},
+            # Pos 5: Claudia – Partnerin von Peter, Ex von René → KONFLIKT
+            {"name": "Claudia Baer",  "color": "#60A5FA", "logic": "even", "flex": "disc", "court": "no_court"},
+            # Pos 6: René – Ex von Claudia, flex=yes → wird Pivot
+            {"name": "René Baer",     "color": "#F472B6", "logic": "even", "flex": "yes",  "court": "no_court"},
         ],
-        "couples": [(0, 1, ["Luca"]), (2, 3, ["Sophia", "Max"]), (4, 5, ["Nele"])],
+        "couples": [
+            (0, 1, ["Mia"]),            # Laura ↔ Stefan (Ex)
+            (2, 3, ["Jonas", "Lea"]),   # Monika ↔ Peter (Ex)
+            (4, 5, ["Zoe"]),            # Claudia ↔ René (Ex) → Konflikt
+        ],
+        "current_partners": [(1, 2), (3, 4)],  # Stefan↔Monika, Peter↔Claudia
     },
-    "two_conflicts": {
-        "label": "Szenario 3 – Zwei Konflikte (Eskalation)",
-        "description": "Zwei unabhängige Konflikte. Algorithmus eskaliert zu Stufe 3a.",
-        "phone_prefix": "+41 79 300 00 ",
+
+    # ── Szenario 3: Ungern-Konflikt (Stufe 2) ─────────────────────────────
+    # Kettenstruktur:
+    #   Petra ←Ex→ Lukas ←Partner→ Sabine ←Ex→ Oliver ←Partner→ Vera ←Ex→ Tobias
+    # Konflikt: Vera & Tobias (beide even)
+    # Tobias flex=rel → ungern wechseln → Kido fragt privat → Stufe 2
+    "ungern_konflikt": {
+        "label": "Szenario 3 – Ungern-Konflikt (Stufe 2, privat)",
+        "description": (
+            "Petra & Lukas (Ex, Kinder: Finn, Clara). Lukas & Sabine (Paar). "
+            "Sabine & Oliver (Ex, Kinder: Noah). Oliver & Vera (Paar). "
+            "Vera & Tobias (Ex, Kinder: Mia). "
+            "Konflikt: Vera & Tobias beide even. "
+            "Tobias (flex=rel) wechselt ungern → Kido fragt privat, Stufe 2."
+        ),
+        "phone_prefix": "+41 79 300 10 ",
         "members": [
-            {"name": "Lina Graf",     "color": "#1D9E75", "logic": "even", "flex": "disc", "court": "no_court"},
-            {"name": "Marco Graf",    "color": "#E24B4A", "logic": "even", "flex": "rel",  "court": "court_strict"},
-            {"name": "Clara Hunziker","color": "#8B5CF6", "logic": "odd",  "flex": "disc", "court": "no_court"},
-            {"name": "Luca Hunziker", "color": "#F59E0B", "logic": "even", "flex": "disc", "court": "no_court"},
-            {"name": "Noah Steiner",  "color": "#60A5FA", "logic": "even", "flex": "disc", "court": "no_court"},
-            {"name": "Mila Steiner",  "color": "#F472B6", "logic": "even", "flex": "no",   "court": "court_strict"},
+            # Pos 1: Petra – Ex von Lukas
+            {"name": "Petra Lang",    "color": "#1D9E75", "logic": "odd",  "flex": "disc", "court": "no_court"},
+            # Pos 2: Lukas – Ex von Petra, Partner von Sabine
+            {"name": "Lukas Lang",    "color": "#8B5CF6", "logic": "even", "flex": "disc", "court": "no_court"},
+            # Pos 3: Sabine – Partnerin von Lukas, Ex von Oliver
+            {"name": "Sabine Vogt",   "color": "#FB7185", "logic": "odd",  "flex": "disc", "court": "no_court"},
+            # Pos 4: Oliver – Ex von Sabine, Partner von Vera
+            {"name": "Oliver Vogt",   "color": "#F59E0B", "logic": "even", "flex": "disc", "court": "no_court"},
+            # Pos 5: Vera – Partnerin von Oliver, Ex von Tobias → KONFLIKT
+            {"name": "Vera Roth",     "color": "#60A5FA", "logic": "even", "flex": "disc", "court": "no_court"},
+            # Pos 6: Tobias – Ex von Vera, flex=rel → ungern → Stufe 2
+            {"name": "Tobias Roth",   "color": "#F472B6", "logic": "even", "flex": "rel",  "court": "no_court"},
         ],
-        "couples": [(0, 1, ["Anna", "Tim"]), (2, 3, ["Jana"]), (4, 5, ["Ella", "Jan"])],
+        "couples": [
+            (0, 1, ["Finn", "Clara"]),  # Petra ↔ Lukas (Ex)
+            (2, 3, ["Noah"]),            # Sabine ↔ Oliver (Ex)
+            (4, 5, ["Mia"]),             # Vera ↔ Tobias (Ex) → Konflikt
+        ],
+        "current_partners": [(1, 2), (3, 4)],  # Lukas↔Sabine, Oliver↔Vera
+    },
+
+    # ── Szenario 4: Doppelter Kettenkonflikt (Stufe 3a) ───────────────────
+    # Kettenstruktur:
+    #   Sandra ←Ex→ Felix ←Partner→ Julia ←Ex→ Markus ←Partner→ Lisa ←Ex→ Hans
+    # Konflikt 1: Sandra & Felix (beide even) → Felix court_strict → BLOCKER
+    # Konflikt 2: Lisa & Hans (beide odd) → Hans flex=no → BLOCKER
+    # Kein Einzelpivot lösbar → Stufe 3a
+    "doppelter_konflikt": {
+        "label": "Szenario 4 – Doppelter Kettenkonflikt (Stufe 3a)",
+        "description": (
+            "Sandra & Felix (Ex, Kinder: Max, Lina). Felix court_strict. "
+            "Felix & Julia (Paar). Julia & Markus (Ex, Kinder: Tom). "
+            "Markus & Lisa (Paar). Lisa & Hans (Ex, Kinder: Emma). Hans flex=no. "
+            "Konflikt 1: Sandra & Felix beide even, Felix blockiert. "
+            "Konflikt 2: Lisa & Hans beide odd, Hans blockiert. "
+            "→ Stufe 3a, zwei Blocker."
+        ),
+        "phone_prefix": "+41 79 400 10 ",
+        "members": [
+            # Pos 1: Sandra – Ex von Felix → KONFLIKT 1
+            {"name": "Sandra Graf",   "color": "#1D9E75", "logic": "even", "flex": "disc", "court": "no_court"},
+            # Pos 2: Felix – Ex von Sandra, Partner von Julia → BLOCKER (court_strict)
+            {"name": "Felix Graf",    "color": "#8B5CF6", "logic": "even", "flex": "rel",  "court": "court_strict"},
+            # Pos 3: Julia – Partnerin von Felix, Ex von Markus
+            {"name": "Julia Müller",  "color": "#FB7185", "logic": "odd",  "flex": "disc", "court": "no_court"},
+            # Pos 4: Markus – Ex von Julia, Partner von Lisa
+            {"name": "Markus Müller", "color": "#F59E0B", "logic": "even", "flex": "disc", "court": "no_court"},
+            # Pos 5: Lisa – Partnerin von Markus, Ex von Hans → KONFLIKT 2
+            {"name": "Lisa Schmid",   "color": "#60A5FA", "logic": "odd",  "flex": "disc", "court": "no_court"},
+            # Pos 6: Hans – Ex von Lisa → BLOCKER (flex=no)
+            {"name": "Hans Schmid",   "color": "#F472B6", "logic": "odd",  "flex": "no",   "court": "no_court"},
+        ],
+        "couples": [
+            (0, 1, ["Max", "Lina"]),    # Sandra ↔ Felix (Ex) → Konflikt 1
+            (2, 3, ["Tom"]),             # Julia ↔ Markus (Ex)
+            (4, 5, ["Emma"]),            # Lisa ↔ Hans (Ex) → Konflikt 2
+        ],
+        "current_partners": [(1, 2), (3, 4)],  # Felix↔Julia, Markus↔Lisa
     },
 }
- 
+
 @app.post("/api/dev/seed-test-chain")
-async def seed_test_chain(scenario: str = "one_conflict"):
+async def seed_test_chain(scenario: str = "bruecken_konflikt"):
     if scenario not in TEST_SCENARIOS:
         raise HTTPException(status_code=400, detail=f"Unknown scenario: {scenario}")
     spec = TEST_SCENARIOS[scenario]
     phone_prefix = spec["phone_prefix"]
     member_specs = spec["members"]
- 
+
     # 1) Alte Testdaten entfernen
     test_phones = [phone_prefix + f"{i+1:02d}" for i in range(len(member_specs))]
     old_users = await db.users.find({"phone": {"$in": test_phones}}).to_list(50)
@@ -945,13 +1051,13 @@ async def seed_test_chain(scenario: str = "one_conflict"):
         await db.chains.delete_many({"_id": {"$in": [ObjectId(cid) for cid in old_chain_ids if ObjectId.is_valid(cid)]}})
     if old_user_ids:
         await db.users.delete_many({"_id": {"$in": [ObjectId(uid) for uid in old_user_ids if ObjectId.is_valid(uid)]}})
- 
+
     # 2) Neue Chain + Users + Members erstellen
     now = datetime.now(timezone.utc)
     chain_doc = {"name": spec["label"], "host_id": "", "status": "active", "created_date": now}
     chain_result = await db.chains.insert_one(chain_doc)
     chain_id = str(chain_result.inserted_id)
- 
+
     created_members = []
     host_id = None
     for idx, m in enumerate(member_specs):
@@ -974,9 +1080,9 @@ async def seed_test_chain(scenario: str = "one_conflict"):
             "phone": phone, "is_host": is_host,
             "logic": m["logic"], "flex": m["flex"], "court": m["court"], "prefsSet": True, "kanton": "ZH",
         })
- 
+
     await db.chains.update_one({"_id": ObjectId(chain_id)}, {"$set": {"host_id": host_id}})
- 
+
     # 3) Coparent Relations erstellen (KORREKT: aus couples-Definition)
     coparent_rels_data = []
     for (i, j, children) in spec["couples"]:
@@ -989,13 +1095,13 @@ async def seed_test_chain(scenario: str = "one_conflict"):
         }
         await db.coparent_relations.insert_one(rel)
         coparent_rels_data.append(serialize_doc(rel))
- 
+
     # 4) Plan berechnen (KORRIGIERT: mit coparent_relations)
     members = await db.chain_members.find({"chain_id": chain_id}).sort("position", 1).to_list(20)
     members_data = [serialize_doc(m) for m in members]
     result = calculate_plan(members_data, coparent_relations=coparent_rels_data)
     stage = result.get("stage", "1_clean")
- 
+
     plan = {"chain_id": chain_id, "status": "proposed",
             "proposal_type": result["type"],
             "escalation_stage": stage,
@@ -1008,12 +1114,12 @@ async def seed_test_chain(scenario: str = "one_conflict"):
             "proposed_schedule": result["proposed_schedule"],
             "weekends": result["weekends"],
             "kido_message": result["kido_message"], "created_date": now}
- 
+
     plan_res = await db.weekend_plans.insert_one(plan)
     plan_id = str(plan_res.inserted_id)
     cur_s = result["schedule"]
     prop_s = result["proposed_schedule"]
- 
+
     for m in members_data:
         mid = m["id"]
         changes = cur_s.get(mid) != prop_s.get(mid)
@@ -1028,7 +1134,7 @@ async def seed_test_chain(scenario: str = "one_conflict"):
             "vote": "pending" if is_active else "na",
             "is_active": is_active, "logic_changes": changes, "created_date": now,
         })
- 
+
     return {
         "scenario": scenario,
         "chain_id": chain_id,
@@ -1040,9 +1146,9 @@ async def seed_test_chain(scenario: str = "one_conflict"):
         "blockers_count": len(result.get("blockers", [])),
         "members": created_members,
     }
- 
+
 # ── Chat Channels ─────────────────────────────────────────────────────────────
- 
+
 class ChatChannelRequest(BaseModel):
     chain_id: str
     name: str
@@ -1051,13 +1157,13 @@ class ChatChannelRequest(BaseModel):
     created_by: Optional[str] = None
     icon: Optional[str] = None
     color: Optional[str] = None
- 
+
 class UpdateChatChannelRequest(BaseModel):
     name: Optional[str] = None
     member_ids: Optional[List[str]] = None
     icon: Optional[str] = None
     color: Optional[str] = None
- 
+
 @app.post("/api/chat-channels")
 async def create_channel(req: ChatChannelRequest):
     doc = {"chain_id": req.chain_id, "name": req.name, "member_ids": req.member_ids,
@@ -1067,7 +1173,7 @@ async def create_channel(req: ChatChannelRequest):
     res = await db.chat_channels.insert_one(doc)
     doc["_id"] = res.inserted_id
     return serialize_doc(doc)
- 
+
 @app.get("/api/chains/{chain_id}/chat-channels")
 async def list_channels(chain_id: str, viewer_member_id: Optional[str] = None):
     channels = await db.chat_channels.find({"chain_id": chain_id}).to_list(100)
@@ -1077,7 +1183,7 @@ async def list_channels(chain_id: str, viewer_member_id: Optional[str] = None):
             continue
         out.append(serialize_doc(c))
     return out
- 
+
 @app.put("/api/chat-channels/{channel_id}")
 async def update_channel(channel_id: str, req: UpdateChatChannelRequest):
     if not ObjectId.is_valid(channel_id):
@@ -1087,7 +1193,7 @@ async def update_channel(channel_id: str, req: UpdateChatChannelRequest):
         await db.chat_channels.update_one({"_id": ObjectId(channel_id)}, {"$set": upd})
     c = await db.chat_channels.find_one({"_id": ObjectId(channel_id)})
     return serialize_doc(c)
- 
+
 @app.delete("/api/chat-channels/{channel_id}")
 async def delete_channel(channel_id: str):
     if not ObjectId.is_valid(channel_id):
@@ -1095,13 +1201,13 @@ async def delete_channel(channel_id: str):
     await db.chat_channels.delete_one({"_id": ObjectId(channel_id)})
     await db.channel_messages.delete_many({"channel_id": channel_id})
     return {"deleted": True}
- 
+
 class ChannelMessageRequest(BaseModel):
     sender_id: str
     text: str
     was_moderated: bool = False
     original_text: Optional[str] = None
- 
+
 @app.post("/api/chat-channels/{channel_id}/messages")
 async def send_channel_message(channel_id: str, req: ChannelMessageRequest):
     msg = {"channel_id": channel_id, "sender_id": req.sender_id, "text": req.text,
@@ -1110,20 +1216,20 @@ async def send_channel_message(channel_id: str, req: ChannelMessageRequest):
     res = await db.channel_messages.insert_one(msg)
     msg["_id"] = res.inserted_id
     return serialize_doc(msg)
- 
+
 @app.get("/api/chat-channels/{channel_id}/messages")
 async def get_channel_messages(channel_id: str):
     msgs = await db.channel_messages.find({"channel_id": channel_id}).sort("created_date", 1).to_list(200)
     return [serialize_doc(m) for m in msgs]
- 
+
 # ── Coparent Relations ────────────────────────────────────────────────────────
- 
+
 class CoparentRelationRequest(BaseModel):
     chain_id: str
     parent1_id: str
     parent2_id: str
     children: Optional[List[dict]] = None
- 
+
 @app.post("/api/coparent-relations")
 async def create_coparent_relation(req: CoparentRelationRequest):
     doc = {"chain_id": req.chain_id, "parent1_id": req.parent1_id,
@@ -1132,8 +1238,9 @@ async def create_coparent_relation(req: CoparentRelationRequest):
     res = await db.coparent_relations.insert_one(doc)
     doc["_id"] = res.inserted_id
     return serialize_doc(doc)
- 
+
 @app.get("/api/chains/{chain_id}/coparent-relations")
 async def get_coparent_relations(chain_id: str):
     rels = await db.coparent_relations.find({"chain_id": chain_id}).to_list(50)
     return [serialize_doc(r) for r in rels]
+
