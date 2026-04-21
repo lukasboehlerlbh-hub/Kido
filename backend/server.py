@@ -1043,6 +1043,7 @@ async def seed_test_chain(scenario: str = "bruecken_konflikt"):
     old_chain_ids = list({m["chain_id"] for m in old_members})
     if old_chain_ids:
         await db.coparent_relations.delete_many({"chain_id": {"$in": old_chain_ids}})
+        await db.partner_relations.delete_many({"chain_id": {"$in": old_chain_ids}})
         await db.messages.delete_many({"chain_id": {"$in": old_chain_ids}})
         await db.holiday_wishes.delete_many({"chain_id": {"$in": old_chain_ids}})
         await db.weekend_plans.delete_many({"chain_id": {"$in": old_chain_ids}})
@@ -1096,6 +1097,17 @@ async def seed_test_chain(scenario: str = "bruecken_konflikt"):
         await db.coparent_relations.insert_one(rel)
         coparent_rels_data.append(serialize_doc(rel))
 
+    # 3b) Partner Relations erstellen (aktuelle Partnerschaften)
+    for (i, j) in spec.get("current_partners", []):
+        await db.partner_relations.insert_one({
+            "chain_id": chain_id,
+            "partner1_id": created_members[i]["member_id"],
+            "partner2_id": created_members[j]["member_id"],
+            "partner1_name": created_members[i]["user_name"],
+            "partner2_name": created_members[j]["user_name"],
+            "created_date": now,
+        })
+
     # 4) Plan berechnen (KORRIGIERT: mit coparent_relations)
     members = await db.chain_members.find({"chain_id": chain_id}).sort("position", 1).to_list(20)
     members_data = [serialize_doc(m) for m in members]
@@ -1145,6 +1157,63 @@ async def seed_test_chain(scenario: str = "bruecken_konflikt"):
         "pivot_member_name": result.get("pivot_name"),
         "blockers_count": len(result.get("blockers", [])),
         "members": created_members,
+    }
+
+# ── Partner Relations ────────────────────────────────────────────────────────
+
+class PartnerRelationRequest(BaseModel):
+    chain_id: str
+    partner1_id: str
+    partner2_id: str
+
+@app.post("/api/partner-relations")
+async def create_partner_relation(req: PartnerRelationRequest):
+    # Prevent duplicates
+    existing = await db.partner_relations.find_one({
+        "chain_id": req.chain_id,
+        "$or": [
+            {"partner1_id": req.partner1_id, "partner2_id": req.partner2_id},
+            {"partner1_id": req.partner2_id, "partner2_id": req.partner1_id},
+        ]
+    })
+    if existing:
+        return serialize_doc(existing)
+    # Get names
+    m1 = await db.chain_members.find_one({"_id": ObjectId(req.partner1_id)})
+    m2 = await db.chain_members.find_one({"_id": ObjectId(req.partner2_id)})
+    doc = {
+        "chain_id": req.chain_id,
+        "partner1_id": req.partner1_id,
+        "partner2_id": req.partner2_id,
+        "partner1_name": m1.get("user_name", "") if m1 else "",
+        "partner2_name": m2.get("user_name", "") if m2 else "",
+        "created_date": datetime.now(timezone.utc)
+    }
+    res = await db.partner_relations.insert_one(doc)
+    doc["_id"] = res.inserted_id
+    return serialize_doc(doc)
+
+@app.get("/api/chains/{chain_id}/partner-relations")
+async def get_partner_relations(chain_id: str):
+    rels = await db.partner_relations.find({"chain_id": chain_id}).to_list(50)
+    return [serialize_doc(r) for r in rels]
+
+@app.delete("/api/partner-relations/{relation_id}")
+async def delete_partner_relation(relation_id: str):
+    if not ObjectId.is_valid(relation_id):
+        raise HTTPException(status_code=400, detail="Invalid relation ID")
+    await db.partner_relations.delete_one({"_id": ObjectId(relation_id)})
+    return {"deleted": True}
+
+@app.get("/api/chains/{chain_id}/relations")
+async def get_all_relations(chain_id: str):
+    """Returns both coparent and partner relations for a chain.
+    Used by the Beziehungen/Relationships settings page."""
+    coparent = await db.coparent_relations.find({"chain_id": chain_id}).to_list(50)
+    partner = await db.partner_relations.find({"chain_id": chain_id}).to_list(50)
+    return {
+        "coparent_relations": [serialize_doc(r) for r in coparent],
+        "partner_relations": [serialize_doc(r) for r in partner],
     }
 
 # ── Chat Channels ─────────────────────────────────────────────────────────────
@@ -1243,4 +1312,3 @@ async def create_coparent_relation(req: CoparentRelationRequest):
 async def get_coparent_relations(chain_id: str):
     rels = await db.coparent_relations.find({"chain_id": chain_id}).to_list(50)
     return [serialize_doc(r) for r in rels]
-
