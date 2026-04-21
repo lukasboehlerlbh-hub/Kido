@@ -132,34 +132,90 @@ def compute_blockers_by_pairs(members, pairs, schedule):
                 blockers.append(mid)
     return blockers
 
-def calculate_plan(members, coparent_relations=None, rejected_pivot_ids=None):
+def find_partner_conflicts(schedule, partner_pairs, min_shared_free=2):
     """
-    KORRIGIERTER Hauptalgorithmus.
-    Konflikte werden zwischen Ex-Paaren geprüft (nicht Nachbarn).
-    Pivot muss Teil eines Konflikt-Paares sein.
+    NEU: Prüft ob aktuelle Paare genügend gemeinsame freie Wochenenden haben.
+    
+    Ein "Partner-Konflikt" entsteht wenn zwei aktuelle Partner weniger als
+    min_shared_free gemeinsame freie Wochenenden haben.
+    
+    Frei = schedule[id][week] == False (keine Kinder an diesem WE)
+    """
+    conflicts = []
+    for (id1, id2) in partner_pairs:
+        sched1 = schedule.get(id1, [False] * 8)
+        sched2 = schedule.get(id2, [False] * 8)
+        # Gemeinsame freie WE = beide haben KEINE Kinder
+        shared_free = sum(1 for w in range(8) if not sched1[w] and not sched2[w])
+        if shared_free < min_shared_free:
+            conflicts.append({
+                "pair": (id1, id2),
+                "type": "partner",
+                "shared_free": shared_free,
+                "needed": min_shared_free
+            })
+    return conflicts
+
+
+def build_partner_pairs(partner_relations):
+    """Baut Paar-Liste aus partner_relations auf."""
+    pairs = []
+    for rel in (partner_relations or []):
+        p1 = rel.get("partner1_id")
+        p2 = rel.get("partner2_id")
+        if p1 and p2:
+            pairs.append((str(p1), str(p2)))
+    return pairs
+
+
+def find_all_conflicts(schedule, coparent_pairs, partner_pairs):
+    """Kombiniert Ex-Paar und Partner-Konflikte."""
+    ex_conflicts = find_conflicts_by_pairs(schedule, coparent_pairs)
+    partner_conflicts = find_partner_conflicts(schedule, partner_pairs)
+    return ex_conflicts + partner_conflicts
+
+
+def calculate_plan(members, coparent_relations=None, partner_relations=None, rejected_pivot_ids=None):
+    """
+    ERWEITERTER Hauptalgorithmus.
+    
+    Berücksichtigt ZWEI Konflikttypen:
+    - Typ A (Ex-Konflikt): Beide Ex-Partner wollen das gleiche WE mit Kindern
+    - Typ B (Partner-Konflikt): Aktuelle Partner haben zu wenig gemeinsame freie WE
+    
+    Die Lösung muss beide Konflikttypen auflösen.
     """
     rejected_pivot_ids = rejected_pivot_ids or []
     coparent_relations = coparent_relations or []
+    partner_relations = partner_relations or []
 
     weekends = get_next_weekends(8)
-    pairs = build_coparent_pairs(members, coparent_relations)
-    current_schedule = calc_schedule(members)
-    conflicts = find_conflicts_by_pairs(current_schedule, pairs)
 
-    if not conflicts:
+    # Paar-Listen aufbauen
+    coparent_pairs = build_coparent_pairs(members, coparent_relations)
+    partner_pairs = build_partner_pairs(partner_relations)
+
+    # Aktuellen Plan berechnen
+    current_schedule = calc_schedule(members)
+
+    # Alle Konflikte prüfen (Ex + Partner)
+    all_conflicts = find_all_conflicts(current_schedule, coparent_pairs, partner_pairs)
+
+    if not all_conflicts:
         return {
             "type": "clean", "stage": "1_clean",
             "pivot_id": None, "pivot_name": None, "new_logic": None,
             "schedule": current_schedule, "proposed_schedule": current_schedule,
             "weekends": weekends, "blockers": [], "subgroups": None,
+            "conflict_details": [],
             "kido_message": KIDO_MSG["clean"]
         }
 
-    # IDs aller Personen in Konflikt-Paaren
-    conflicted_pair_ids = set()
-    for c in conflicts:
-        conflicted_pair_ids.add(c["pair"][0])
-        conflicted_pair_ids.add(c["pair"][1])
+    # IDs aller Personen die in einem Konflikt involviert sind
+    conflicted_ids = set()
+    for c in all_conflicts:
+        conflicted_ids.add(c["pair"][0])
+        conflicted_ids.add(c["pair"][1])
 
     # Kandidaten nach Flex-Score sortieren (höchster zuerst)
     sorted_members = sorted(
@@ -177,16 +233,17 @@ def calculate_plan(members, coparent_relations=None, rejected_pivot_ids=None):
         # Bereits abgelehnt → überspringen
         if cid in rejected_pivot_ids:
             continue
-        # Nicht in einem Konflikt-Paar → muss nicht wechseln
-        if cid not in conflicted_pair_ids:
+        # Nicht in einem Konflikt involviert → muss nicht wechseln
+        if cid not in conflicted_ids:
             continue
 
         # Logikwechsel testen
         new_logic = "odd" if candidate.get("current_logic", "even") == "even" else "even"
         trial_schedule = calc_schedule(members, {cid: new_logic})
-        trial_conflicts = find_conflicts_by_pairs(trial_schedule, pairs)
+        trial_conflicts = find_all_conflicts(trial_schedule, coparent_pairs, partner_pairs)
 
         if not trial_conflicts:
+            # Lösung gefunden!
             is_ungern = candidate.get("flex_level") in ["rel", "temp"]
             stage = "2_ungern" if is_ungern else "1_clean"
             return {
@@ -199,16 +256,25 @@ def calculate_plan(members, coparent_relations=None, rejected_pivot_ids=None):
                 "proposed_schedule": trial_schedule,
                 "weekends": weekends,
                 "blockers": [], "subgroups": None,
+                "conflict_details": all_conflicts,
                 "kido_message": KIDO_MSG["ungern"] if is_ungern else KIDO_MSG["clean"]
             }
 
-    # Keine Lösung → Stufe 3a
-    blockers = compute_blockers_by_pairs(members, pairs, current_schedule)
+    # Keine Einzellösung → Stufe 3a
+    blockers = compute_blockers_by_pairs(members, coparent_pairs, current_schedule)
+    # Auch Partner-Konflikte als Blocker berücksichtigen
+    for c in find_partner_conflicts(current_schedule, partner_pairs):
+        for pid in c["pair"]:
+            m = next((m for m in members if str(m.get("id") or str(m.get("_id", ""))) == pid), None)
+            if m and FLEX_SCORES.get(get_effective_flex(m), 0) <= 1 and pid not in blockers:
+                blockers.append(pid)
+
     return {
         "type": "blocked", "stage": "3a_blockers",
         "pivot_id": None, "pivot_name": None, "new_logic": None,
         "schedule": current_schedule, "proposed_schedule": current_schedule,
         "weekends": weekends, "blockers": blockers, "subgroups": None,
+        "conflict_details": all_conflicts,
         "kido_message": KIDO_MSG["blocked_3a"]
     }
 
@@ -585,11 +651,13 @@ async def calculate_weekend_plan(chain_id: str):
         raise HTTPException(status_code=404, detail="No members found")
     members_data = [serialize_doc(m) for m in members]
 
-    # KORRIGIERT: coparent_relations aus DB laden
+    # Beziehungen aus DB laden
     coparent_rels = await db.coparent_relations.find({"chain_id": chain_id}).to_list(50)
     coparent_rels_data = [serialize_doc(r) for r in coparent_rels]
+    partner_rels = await db.partner_relations.find({"chain_id": chain_id}).to_list(50)
+    partner_rels_data = [serialize_doc(r) for r in partner_rels]
 
-    result = calculate_plan(members_data, coparent_relations=coparent_rels_data)
+    result = calculate_plan(members_data, coparent_relations=coparent_rels_data, partner_relations=partner_rels_data)
     subgroups = compute_subgroups(members_data, coparent_relations=coparent_rels_data) if result.get("stage") == "3a_blockers" else None
 
     plan = {"chain_id": chain_id, "status": "proposed",
@@ -677,11 +745,13 @@ async def try_next_pivot(plan_id: str):
     members = await db.chain_members.find({"chain_id": chain_id}).sort("position", 1).to_list(20)
     members_data = [serialize_doc(m) for m in members]
 
-    # KORRIGIERT: coparent_relations aus DB laden
+    # Beziehungen aus DB laden
     coparent_rels = await db.coparent_relations.find({"chain_id": chain_id}).to_list(50)
     coparent_rels_data = [serialize_doc(r) for r in coparent_rels]
+    partner_rels = await db.partner_relations.find({"chain_id": chain_id}).to_list(50)
+    partner_rels_data = [serialize_doc(r) for r in partner_rels]
 
-    result = calculate_plan(members_data, coparent_relations=coparent_rels_data, rejected_pivot_ids=rejected)
+    result = calculate_plan(members_data, coparent_relations=coparent_rels_data, partner_relations=partner_rels_data, rejected_pivot_ids=rejected)
     now = datetime.now(timezone.utc)
     subgroups = compute_subgroups(members_data, coparent_relations=coparent_rels_data) if result.get("stage") == "3a_blockers" else None
 
@@ -740,7 +810,7 @@ async def escalate_to_3b(plan_id: str):
     members = await db.chain_members.find({"chain_id": chain_id}).sort("position", 1).to_list(20)
     members_data = [serialize_doc(m) for m in members]
 
-    # KORRIGIERT: coparent_relations aus DB laden
+    # Beziehungen aus DB laden
     coparent_rels = await db.coparent_relations.find({"chain_id": chain_id}).to_list(50)
     coparent_rels_data = [serialize_doc(r) for r in coparent_rels]
 
@@ -893,16 +963,21 @@ TEST_SCENARIOS: Dict[str, Dict[str, Any]] = {
         "phone_prefix": "+41 79 100 10 ",
         "members": [
             # Pos 1: Anna – Ex von Thomas
+            # Anna(even) ←Ex→ Thomas(odd): alternieren ✓
             {"name": "Anna Meier",   "color": "#1D9E75", "logic": "even", "flex": "disc", "court": "no_court"},
-            # Pos 2: Thomas – Ex von Anna, Partner von Nina
+            # Pos 2: Thomas – Ex von Anna(even), Partner von Nina(odd)
+            # Thomas(odd) frei@even, Nina(odd) frei@even → 4 gemeinsame freie WE ✓
             {"name": "Thomas Meier", "color": "#8B5CF6", "logic": "odd",  "flex": "disc", "court": "no_court"},
-            # Pos 3: Nina – Partnerin von Thomas, Ex von Marco
+            # Pos 3: Nina – Partnerin von Thomas(odd), Ex von Marco(even)
+            # Nina(odd) ←Ex→ Marco(even): alternieren ✓
             {"name": "Nina Huber",   "color": "#FB7185", "logic": "odd",  "flex": "disc", "court": "no_court"},
-            # Pos 4: Marco – Ex von Nina, Partner von Sara
+            # Pos 4: Marco – Ex von Nina(odd), Partner von Sara(even)
+            # Marco(even) frei@odd, Sara(even) frei@odd → 4 gemeinsame freie WE ✓
             {"name": "Marco Huber",  "color": "#F59E0B", "logic": "even", "flex": "disc", "court": "no_court"},
-            # Pos 5: Sara – Partnerin von Marco, Ex von David
+            # Pos 5: Sara – Partnerin von Marco(even), Ex von David(odd)
+            # Sara(even) ←Ex→ David(odd): alternieren ✓
             {"name": "Sara Keller",  "color": "#60A5FA", "logic": "even", "flex": "disc", "court": "no_court"},
-            # Pos 6: David – Ex von Sara
+            # Pos 6: David – Ex von Sara(even)
             {"name": "David Keller", "color": "#F472B6", "logic": "odd",  "flex": "disc", "court": "no_court"},
         ],
         "couples": [
@@ -930,17 +1005,22 @@ TEST_SCENARIOS: Dict[str, Dict[str, Any]] = {
         "phone_prefix": "+41 79 200 10 ",
         "members": [
             # Pos 1: Laura – Ex von Stefan
+            # Laura(odd) ←Ex→ Stefan(even): alternieren ✓
             {"name": "Laura Frei",    "color": "#1D9E75", "logic": "odd",  "flex": "disc", "court": "no_court"},
             # Pos 2: Stefan – Ex von Laura, Partner von Monika
+            # Stefan(even) frei@odd, Monika(even) frei@odd → 4 gemeinsame ✓
             {"name": "Stefan Frei",   "color": "#8B5CF6", "logic": "even", "flex": "disc", "court": "no_court"},
-            # Pos 3: Monika – Partnerin von Stefan, Ex von Peter
-            {"name": "Monika Suter",  "color": "#FB7185", "logic": "odd",  "flex": "disc", "court": "no_court"},
-            # Pos 4: Peter – Ex von Monika, Partner von Claudia
-            {"name": "Peter Suter",   "color": "#F59E0B", "logic": "even", "flex": "disc", "court": "no_court"},
-            # Pos 5: Claudia – Partnerin von Peter, Ex von René → KONFLIKT
-            {"name": "Claudia Baer",  "color": "#60A5FA", "logic": "even", "flex": "disc", "court": "no_court"},
-            # Pos 6: René – Ex von Claudia, flex=yes → wird Pivot
-            {"name": "René Baer",     "color": "#F472B6", "logic": "even", "flex": "yes",  "court": "no_court"},
+            # Pos 3: Monika – Partnerin von Stefan(even), Ex von Peter
+            # Monika(even) ←Ex→ Peter(odd): alternieren ✓
+            {"name": "Monika Suter",  "color": "#FB7185", "logic": "even", "flex": "disc", "court": "no_court"},
+            # Pos 4: Peter – Ex von Monika(even), Partner von Claudia
+            # Peter(odd) frei@even, Claudia(odd) frei@even → 4 gemeinsame ✓
+            {"name": "Peter Suter",   "color": "#F59E0B", "logic": "odd",  "flex": "disc", "court": "no_court"},
+            # Pos 5: Claudia – Partnerin von Peter(odd), Ex von René → EX-KONFLIKT
+            # Claudia(odd) ←Ex→ René(odd): BEIDE ODD → Konflikt!
+            {"name": "Claudia Baer",  "color": "#60A5FA", "logic": "odd",  "flex": "disc", "court": "no_court"},
+            # Pos 6: René – Ex von Claudia(odd), flex=yes → wird Pivot (wechselt auf even)
+            {"name": "René Baer",     "color": "#F472B6", "logic": "odd",  "flex": "yes",  "court": "no_court"},
         ],
         "couples": [
             (0, 1, ["Mia"]),            # Laura ↔ Stefan (Ex)
@@ -967,17 +1047,22 @@ TEST_SCENARIOS: Dict[str, Dict[str, Any]] = {
         "phone_prefix": "+41 79 300 10 ",
         "members": [
             # Pos 1: Petra – Ex von Lukas
+            # Petra(odd) ←Ex→ Lukas(even): alternieren ✓
             {"name": "Petra Lang",    "color": "#1D9E75", "logic": "odd",  "flex": "disc", "court": "no_court"},
             # Pos 2: Lukas – Ex von Petra, Partner von Sabine
+            # Lukas(even) frei@odd, Sabine(even) frei@odd → 4 gemeinsame ✓
             {"name": "Lukas Lang",    "color": "#8B5CF6", "logic": "even", "flex": "disc", "court": "no_court"},
-            # Pos 3: Sabine – Partnerin von Lukas, Ex von Oliver
-            {"name": "Sabine Vogt",   "color": "#FB7185", "logic": "odd",  "flex": "disc", "court": "no_court"},
-            # Pos 4: Oliver – Ex von Sabine, Partner von Vera
-            {"name": "Oliver Vogt",   "color": "#F59E0B", "logic": "even", "flex": "disc", "court": "no_court"},
-            # Pos 5: Vera – Partnerin von Oliver, Ex von Tobias → KONFLIKT
-            {"name": "Vera Roth",     "color": "#60A5FA", "logic": "even", "flex": "disc", "court": "no_court"},
-            # Pos 6: Tobias – Ex von Vera, flex=rel → ungern → Stufe 2
-            {"name": "Tobias Roth",   "color": "#F472B6", "logic": "even", "flex": "rel",  "court": "no_court"},
+            # Pos 3: Sabine – Partnerin von Lukas(even), Ex von Oliver
+            # Sabine(even) ←Ex→ Oliver(odd): alternieren ✓
+            {"name": "Sabine Vogt",   "color": "#FB7185", "logic": "even", "flex": "disc", "court": "no_court"},
+            # Pos 4: Oliver – Ex von Sabine(even), Partner von Vera
+            # Oliver(odd) frei@even, Vera(odd) frei@even → 4 gemeinsame ✓
+            {"name": "Oliver Vogt",   "color": "#F59E0B", "logic": "odd",  "flex": "disc", "court": "no_court"},
+            # Pos 5: Vera – Partnerin von Oliver(odd), Ex von Tobias → EX-KONFLIKT
+            # Vera(odd) ←Ex→ Tobias(odd): BEIDE ODD → Konflikt!
+            {"name": "Vera Roth",     "color": "#60A5FA", "logic": "odd",  "flex": "disc", "court": "no_court"},
+            # Pos 6: Tobias – Ex von Vera(odd), flex=rel → wechselt ungern auf even → Stufe 2
+            {"name": "Tobias Roth",   "color": "#F472B6", "logic": "odd",  "flex": "rel",  "court": "no_court"},
         ],
         "couples": [
             (0, 1, ["Finn", "Clara"]),  # Petra ↔ Lukas (Ex)
@@ -1111,7 +1196,11 @@ async def seed_test_chain(scenario: str = "bruecken_konflikt"):
     # 4) Plan berechnen (KORRIGIERT: mit coparent_relations)
     members = await db.chain_members.find({"chain_id": chain_id}).sort("position", 1).to_list(20)
     members_data = [serialize_doc(m) for m in members]
-    result = calculate_plan(members_data, coparent_relations=coparent_rels_data)
+    # Partner Relations aus DB laden
+    partner_rels = await db.partner_relations.find({"chain_id": chain_id}).to_list(50)
+    partner_rels_data = [serialize_doc(r) for r in partner_rels]
+
+    result = calculate_plan(members_data, coparent_relations=coparent_rels_data, partner_relations=partner_rels_data)
     stage = result.get("stage", "1_clean")
 
     plan = {"chain_id": chain_id, "status": "proposed",
